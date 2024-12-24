@@ -1,15 +1,19 @@
 # path: f2/apps/tiktok/dl.py
 
-import sys
+import asyncio
+
+from rich.live import Live
+from rich.rule import Rule
 from datetime import datetime
 from typing import Any, Union
 
 from f2.i18n.translator import _
 from f2.log.logger import logger
 from f2.dl.base_downloader import BaseDownloader
-from f2.utils.utils import get_timestamp, timestamp_2_str
+from f2.utils.utils import get_timestamp, timestamp_2_str, filter_by_date_interval
 from f2.apps.tiktok.db import AsyncUserDB
 from f2.apps.tiktok.utils import format_file_name
+from f2.cli.cli_console import RichConsoleManager
 
 
 class TiktokDownloader(BaseDownloader):
@@ -61,8 +65,6 @@ class TiktokDownloader(BaseDownloader):
         except ValueError:
             logger.error(_("日期区间参数格式错误，请查阅文档后重试"))
             return None
-
-        logger.info(aweme_datas)
 
         if isinstance(aweme_datas, dict):
             aweme_date_str = aweme_datas.get("createTime")
@@ -123,23 +125,36 @@ class TiktokDownloader(BaseDownloader):
         )
 
         # 筛选指定日期区间内的作品
-        if kwargs.get("interval") != "all":
-            aweme_datas_list = await self.filter_aweme_datas_by_interval(
-                aweme_datas_list, kwargs.get("interval")
+        if kwargs.get("interval") is None:
+            logger.warning(_("未提供日期区间参数"))
+        elif kwargs.get("interval") != "all":
+            aweme_datas_list = await filter_by_date_interval(
+                aweme_datas_list, kwargs.get("interval"), "createTime"
             )
 
         # 检查是否有符合条件的作品
         if not aweme_datas_list:
-            logger.warning(_("没有找到符合条件的作品"))
-            await self.close()
-            sys.exit(0)
+            logger.warning(_("没有找到符合条件的作品，请检查`interval`参数是否正确"))
+            return
 
-        # 创建下载任务
-        for aweme_data in aweme_datas_list:
-            await self.handler_download(kwargs, aweme_data, user_path)
+        # 使用 Rich 的 Live 管理器
+        with Live(
+            console=RichConsoleManager().rich_console,
+            auto_refresh=False,
+            # refresh_per_second=2,
+            vertical_overflow="visible",
+        ) as live:
+            for aweme_data in aweme_datas_list:
+                await self.handler_download(kwargs, aweme_data, user_path)
+                # 手动刷新防止过快闪屏
+                live.refresh()
 
-        # 执行下载任务
-        await self.execute_tasks()
+            # 延时更新，避免过快刷新导致界面错乱
+            await asyncio.sleep(0.2)
+            # 动态更新规则输出
+            live.update(Rule(_("当前任务处理完成")))
+
+            await self.execute_tasks()
 
     async def handler_download(
         self, kwargs: dict, aweme_data_dict: dict, user_path: Any
@@ -224,7 +239,7 @@ class TiktokDownloader(BaseDownloader):
                         _("封面"), animated_cover_url, base_path, cover_name, ".webp"
                     )
                 elif cover_url != None:
-                    logger.warning(_("{0} 该作品没有动态封面").format(aweme_id))
+                    logger.debug(_("{0} 该作品没有动态封面").format(aweme_id))
                     await self.initiate_download(
                         _("封面"), cover_url, base_path, cover_name, ".jpeg"
                     )
@@ -285,6 +300,7 @@ class TiktokDownloader(BaseDownloader):
         Args:
             kwargs (dict): 命令行参数
         """
+        # 构建自定义字段
         custom_fields = {
             "create": timestamp_2_str(timestamp=get_timestamp(unit="sec")),
             "nickname": webcast_data_dict.get("nickname", ""),
@@ -293,17 +309,18 @@ class TiktokDownloader(BaseDownloader):
             "desc": webcast_data_dict.get("live_title", ""),
             "uid": webcast_data_dict.get("user_id", ""),
         }
-        # 构建文件夹路径
-        base_path = (
-            user_path
-            / format_file_name(
-                kwargs.get("naming", "{create}_{desc}"), custom_fields=custom_fields
-            )
-            if kwargs.get("folderize")
-            else user_path
+
+        # 格式化文件名
+        formated_name = format_file_name(
+            kwargs.get("naming", "{create}_{desc}"),
+            webcast_data_dict,
+            custom_fields=custom_fields,
         )
 
-        webcast_name = f"{format_file_name(kwargs.get('naming', '{create}_{desc}'), custom_fields=custom_fields)}_live"
+        # 构建文件夹路径
+        base_path = user_path / formated_name if kwargs.get("folderize") else user_path
+
+        webcast_name = f"{formated_name}_live"
         webcast_url = webcast_data_dict.get("live_hls_url", None)
 
         await self.initiate_m3u8_download(

@@ -16,7 +16,7 @@ def help() -> None:
     table.add_column("Description", no_wrap=True)
 
     options = [
-        ("-c --config", "[dark_cyan]Path", _("配置文件的路径，最低优先")),
+        ("-c --config", "[dark_cyan]Path", _("配置文件的路径，[red]最低优先[/red]")),
         ("-u --url", "[dark_cyan]str", _("除了单个推文外，其他URL都需要用户主页URL")),
         ("-p --path", "[dark_cyan]str", _("推文保存位置，默认为 'Download'")),
         (
@@ -28,7 +28,7 @@ def help() -> None:
             "-M --mode",
             "[dark_cyan]Choice",
             _(
-                "下载模式：单个推文[one]、用户推文[post]、用户转推[retweet]、喜欢推文[like]、用户收藏[bookmark]"
+                "下载模式：单个推文(one)、用户推文(post)、喜欢推文(like)、用户收藏(bookmark)"
             ),
         ),
         ("-n --naming", "[dark_cyan]str", _("全局推文文件命名方式")),
@@ -51,7 +51,7 @@ def help() -> None:
             "-P --proxies",
             "[dark_cyan]str",
             _(
-                "代理服务器，最多 2 个参数，http://与https://。空格区分 2 个参数 http://x.x.x.x https://x.x.x.x"
+                "配置代理服务器，支持最多两个参数，分别对应 http:// 和 https:// 协议。如果代理不支持出口 HTTPS，请使用：http://x.x.x.x http://x.x.x.x"
             ),
         ),
         ("--update-config", "[dark_cyan]Flag", _("使用命令行选项更新配置文件")),

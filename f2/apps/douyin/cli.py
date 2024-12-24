@@ -17,6 +17,7 @@ from f2.utils.utils import (
     get_cookie_from_browser,
     check_invalid_naming,
     merge_config,
+    check_proxy_avail,
 )
 from f2.utils.conf_manager import ConfigManager
 from f2.i18n.translator import TranslationManager, _
@@ -78,7 +79,9 @@ def handler_auto_cookie(
         )
         manager.update_config_with_args("douyin", cookie=cookie_value)
     except PermissionError:
-        logger.error(_("请关闭所有已打开的浏览器重试，并且你有适当的权限访问浏览器！"))
+        logger.error(
+            _("请结束所有浏览器相关的进程，并确保你有管理员的权限访问浏览器后重试！")
+        )
         ctx.abort()
     except Exception as e:
         logger.error(_("自动获取Cookie失败：{0}").format(str(e)))
@@ -143,6 +146,38 @@ def handler_naming(
                 value, "".join(invalid_patterns)
             )
         )
+
+    return value
+
+
+def validate_proxies(
+    ctx: click.Context,
+    param: typing.Union[click.Option, click.Parameter],
+    value: typing.Any,
+) -> typing.Any:
+    """验证代理参数 (Validate proxy parameters)
+
+    Args:
+        ctx: click的上下文对象 (Click's context object)
+        param: 提供的参数或选项 (The provided parameter or option)
+        value: 参数或选项的值 (The value of the parameter or option)
+    """
+
+    if value:
+        # 校验代理参数是否合法的代理参数
+        if not all([value[0].startswith("http://"), value[1].startswith("http://")]):
+            raise click.BadParameter(
+                _(
+                    "配置代理服务器，支持最多两个参数，分别对应 http:// 和 https:// 协议。如果代理不支持出口 HTTPS，请使用：http://x.x.x.x http://x.x.x.x"
+                )
+            )
+        # 校验代理服务器是否可用
+        if not check_proxy_avail(
+            http_proxy=value[0],
+            https_proxy=value[1],
+            test_url="https://www.douyin.com/",
+        ):
+            raise click.BadParameter(_("代理服务器不可用"))
 
     return value
 
@@ -263,7 +298,7 @@ def handler_naming(
     "-i",
     type=str,
     # default="all",
-    help=_("下载日期区间发布的作品，格式：2022-01-01|2023-01-01，'all' 为下载所有作品"),
+    help=_("下载日期区间发布的作品，格式：YYYY-MM-DD|YYYY-MM-DD，'all' 为下载所有作品"),
 )
 @click.option(
     "--timeout",
@@ -321,8 +356,9 @@ def handler_naming(
     type=str,
     nargs=2,
     help=_(
-        "代理服务器，最多 2 个参数，http://与https://。空格区分 2 个参数 http://x.x.x.x https://x.x.x.x"
+        "配置代理服务器，支持最多两个参数，分别对应 http:// 和 https:// 协议。如果代理不支持出口 HTTPS，请使用：http://x.x.x.x http://x.x.x.x"
     ),
+    callback=validate_proxies,
 )
 @click.option("--lyric", "-L", type=bool, help=_("是否保存原声歌词"))
 @click.option(
@@ -431,9 +467,15 @@ def douyin(
     logger.debug(_("自定义配置参数：{0}").format(custom_conf))
     logger.debug(_("CLI参数：{0}").format(kwargs))
 
-    # 尝试从命令行参数或kwargs中获取URL
-    if not kwargs.get("url"):
-        logger.error(_("缺乏URL参数，详情看命令帮助"))
+    # 尝试从命令行参数或kwargs中获取url和mode
+    missing_params = [param for param in ["url", "mode"] if not kwargs.get(param)]
+
+    if missing_params:
+        logger.error(
+            _(
+                "DouYin CLI 缺乏必要参数：[cyan]{0}[/cyan]。详情请查看帮助，[yellow]f2 douyin -h/--help[/yellow]"
+            ).format("，".join(missing_params))
+        )
         handler_help(ctx, None, True)
 
     # 添加app_name到kwargs

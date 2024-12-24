@@ -1,14 +1,14 @@
 # path: f2/exceptions/file_exceptions.py
+
 from f2.log.logger import logger
+from f2.i18n.translator import _
 
 
 class FileError(Exception):
     """基本的文件错误异常类，其他文件异常都会继承这个类"""
 
     def __init__(self, message, filepath=None):
-        logger.error(
-            "请前往QA文档 https://johnserf-seed.github.io/f2/question-answer/qa.html 查看相关帮助"
-        )
+        logger.error(_("请前往QA文档 https://f2.wiki/question-answer/qa 查看相关帮助"))
         self.filepath = filepath
         super().__init__(message)
 

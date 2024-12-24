@@ -1,18 +1,20 @@
 # path: f2/crawlers/base_crawler.py
 
+import time
 import httpx
 import json
 import asyncio
 import traceback
 import websockets
+import websockets_proxy
 
 from httpx import Response
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
 from f2.i18n.translator import _
 from f2.log.logger import logger
+from f2.exceptions.conf_exceptions import InvalidEncodingError
 from f2.exceptions.api_exceptions import (
-    APIError,
     APIConnectionError,
     APIResponseError,
     APITimeoutError,
@@ -22,6 +24,7 @@ from f2.exceptions.api_exceptions import (
     APIRateLimitError,
     APIRetryExhaustedError,
 )
+from f2.utils.utils import timestamp_2_str
 
 
 class BaseCrawler:
@@ -31,46 +34,33 @@ class BaseCrawler:
 
     def __init__(
         self,
-        proxies: dict = ...,
-        max_retries: int = 5,
-        max_connections: int = 10,
-        timeout: int = 10,
-        max_tasks: int = 10,
+        kwargs: dict = {},
+        *,
+        proxies: dict = {},
         crawler_headers: dict = {},
     ):
         # 设置代理 (Set proxy)
         self.proxies = proxies
-        if isinstance(proxies, dict):
-            # 底层连接重试次数 / Underlying connection retry count
-            self.sync_transport = httpx.HTTPTransport(
-                proxy=proxies.get("http://", None),
-                retries=max_retries,
-                local_address="0.0.0.0",
-            )
-            # 底层连接重试次数 / Underlying connection retry count
-            self.async_transport = httpx.AsyncHTTPTransport(
-                proxy=proxies.get("http://", None),
-                retries=max_retries,
-                local_address="0.0.0.0",
-            )
+        self.http_proxy = self.proxies.get("http://", None)
+        self.https_proxy = self.proxies.get("https://", None)
 
         # 爬虫请求头 / Crawler request header
         self.crawler_headers = crawler_headers or {}
 
         # 异步的任务数 / Number of asynchronous tasks
-        self._max_tasks = max_tasks
-        self.semaphore = asyncio.Semaphore(max_tasks)
+        self._max_tasks = kwargs.get("max_tasks", 10)
+        self.semaphore = asyncio.Semaphore(self._max_tasks)
 
         # 限制最大连接数 / Limit the maximum number of connections
-        self._max_connections = max_connections
-        self.limits = httpx.Limits(max_connections=max_connections)
+        self._max_connections = kwargs.get("max_connections", 10)
+        self.limits = httpx.Limits(max_connections=self._max_connections)
 
         # 业务逻辑重试次数 / Business logic retry count
-        self._max_retries = max_retries
+        self._max_retries = kwargs.get("max_retries", 5)
 
         # 超时等待时间 / Timeout waiting time
-        self._timeout = timeout
-        self.timeout = httpx.Timeout(timeout)
+        self._timeout = kwargs.get("timeout", 10)
+        self.timeout = httpx.Timeout(self._timeout)
 
         # 异步客户端 / Asynchronous client
         self._aclient = None
@@ -78,26 +68,63 @@ class BaseCrawler:
         # 同步客户端 / Synchronous client
         self._client = None
 
+    def _create_mount(self, async_mode=False) -> dict:
+        """
+        创建挂载配置，根据 async_mode 切换异步或同步的 HTTPTransport
+
+        Args:
+            async_mode: bool: 是否异步模式
+
+        Returns:
+            dict: 挂载配置
+        """
+
+        transport_class = (
+            httpx.AsyncHTTPTransport if async_mode else httpx.HTTPTransport
+        )
+        if isinstance(self.proxies, dict) and self.http_proxy:
+            return {
+                "all://": transport_class(
+                    verify=False,
+                    limits=self.limits,
+                    proxy=httpx.Proxy(url=self.http_proxy),
+                    local_address="0.0.0.0",
+                    retries=self._max_retries,
+                ),
+            }
+        else:
+            return {
+                "all://": transport_class(
+                    verify=False,
+                    limits=self.limits,
+                    retries=self._max_retries,
+                ),
+            }
+
     @property
     def aclient(self):
         if self._aclient is None:
-            self._aclient = httpx.AsyncClient(
-                headers=self.crawler_headers,
-                verify=False,
-                timeout=self.timeout,
-                limits=self.limits,
-            )
+            try:
+                self._aclient = httpx.AsyncClient(
+                    headers=self.crawler_headers,
+                    mounts=self._create_mount(async_mode=True),
+                    timeout=self.timeout,
+                )
+            except UnicodeEncodeError:
+                raise InvalidEncodingError
         return self._aclient
 
     @property
     def client(self):
         if self._client is None:
-            self._client = httpx.Client(
-                headers=self.crawler_headers,
-                verify=False,
-                timeout=self.timeout,
-                limits=self.limits,
-            )
+            try:
+                self._client = httpx.Client(
+                    headers=self.crawler_headers,
+                    mounts=self._create_mount(),
+                    timeout=self.timeout,
+                )
+            except UnicodeEncodeError:
+                raise InvalidEncodingError
         return self._client
 
     async def _fetch_response(self, endpoint: str) -> Response:
@@ -152,16 +179,20 @@ class BaseCrawler:
             try:
                 return response.json()
             except json.JSONDecodeError as e:
-                logger.error(_("解析 {0} 接口 JSON 失败：{1}").format(response.url, e))
+                logger.error(
+                    _("解析 {0} 接口 JSON 失败：{1}").format(str(response.url), e)
+                )
             except UnicodeDecodeError as e:
-                logger.error(_("解析 {0} 接口 JSON 失败：{1}").format(response.url, e))
+                logger.error(
+                    _("接口 {0} JSON 解码错误：{1}").format(str(response.url), e)
+                )
         else:
             if isinstance(response, Response):
                 logger.error(
                     _("获取数据失败。状态码: {0}").format(response.status_code)
                 )
             else:
-                logger.error(_("无效响应类型"))
+                logger.error(_("无效的Json响应"))
 
         return {}
 
@@ -180,14 +211,19 @@ class BaseCrawler:
                 response = await self.aclient.get(url, follow_redirects=True)
                 if not response.text.strip() or not response.content:
                     error_message = _(
-                        "第 {0} 次响应内容为空, 状态码: {1}, URL:{2}"
-                    ).format(attempt + 1, response.status_code, response.url)
+                        "第 {0} 次请求响应内容为空, 状态码: {1}, URL:{2}"
+                    ).format(attempt + 1, response.status_code, str(response.url))
 
                     logger.warning(error_message)
 
                     if attempt == self._max_retries - 1:
                         raise APIRetryExhaustedError(
-                            _("获取端点数据失败, 次数达到上限")
+                            _(
+                                "获取端点数据失败，重试次数达到上限。代理：{0}，异常类名：{1}"
+                            ).format(
+                                self.proxies,
+                                self.__class__.__name__,
+                            )
                         )
 
                     await asyncio.sleep(self._timeout)
@@ -260,9 +296,6 @@ class BaseCrawler:
                     ).format(url, self.proxies, self.__class__.__name__, req_err)
                 )
 
-            except APIError as e:
-                logger.error(e)
-
     async def post_fetch_data(self, url: str, params: dict = {}):
         """
         获取POST端点数据 (Get POST endpoint data)
@@ -281,8 +314,8 @@ class BaseCrawler:
                 )
                 if not response.text.strip() or not response.content:
                     error_message = _(
-                        "第 {0} 次响应内容为空, 状态码: {1}, URL:{2}"
-                    ).format(attempt + 1, response.status_code, response.url)
+                        "第 {0} 次请求响应内容为空, 状态码: {1}, URL:{2}"
+                    ).format(attempt + 1, response.status_code, str(response.url))
 
                     logger.warning(error_message)
 
@@ -307,9 +340,6 @@ class BaseCrawler:
 
             except httpx.HTTPStatusError as http_error:
                 self.handle_http_status_error(http_error, url, attempt + 1)
-
-            except APIError as e:
-                logger.error(e)
 
     async def head_fetch_data(self, url: str):
         """
@@ -336,9 +366,6 @@ class BaseCrawler:
 
         except httpx.HTTPStatusError as http_error:
             self.handle_http_status_error(http_error, url, 1)
-
-        except APIError as e:
-            logger.error(e)
 
     def handle_http_status_error(self, http_error, url: str, attempt):
         """
@@ -410,7 +437,13 @@ class WebSocketCrawler:
     WebSocket爬虫客户端 (WebSocket crawler client)
     """
 
-    def __init__(self, wss_headers: dict, callbacks: dict = None, timeout: int = 10):
+    def __init__(
+        self,
+        wss_headers: dict,
+        callbacks: dict = None,
+        timeout: int = 10,
+        proxy: str = None,
+    ):
         """
         初始化 WebSocketCrawler 实例
 
@@ -421,6 +454,7 @@ class WebSocketCrawler:
         """
         self.websocket = None
         self.wss_headers = wss_headers
+        self.proxy = websockets_proxy.Proxy.from_url(proxy) if proxy else None
         self.callbacks = callbacks or {}  # 存储回调函数
         self.timeout = timeout
 
@@ -435,19 +469,43 @@ class WebSocketCrawler:
             websocket_uri: WebSocket URI (ws:// or wss://)
         """
         try:
-            # https://websockets.readthedocs.io/en/stable/reference/features.html#client 暂不支持代理
-            self.websocket = await websockets.connect(
-                websocket_uri, extra_headers=self.wss_headers
+            # https://websockets.readthedocs.io/en/stable/reference/features.html#client websockets库暂不支持代理
+            # https://github.com/racinette/websockets_proxy 使用websockets_proxy库进行代理
+            if self.proxy:
+                self.websocket = await websockets_proxy.proxy_connect(
+                    websocket_uri,
+                    extra_headers=self.wss_headers,
+                    proxy=self.proxy,
+                    ping_interval=10,
+                    ping_timeout=None,
+                )
+            else:
+                self.websocket = await websockets.connect(
+                    websocket_uri, extra_headers=self.wss_headers
+                )
+            logger.debug(
+                _("[ConnectWebsocket] [🌐 已连接 WebSocket] | [服务器：{0}]").format(
+                    websocket_uri
+                )
             )
-            logger.info(_("已连接 WebSocket"))
         except ConnectionRefusedError as exc:
-            logger.error(traceback.format_exc())
-            logger.error(_("WebSocket 连接被拒绝：{0}").format(exc))
-            raise APIConnectionError(_("连接 WebSocket 失败：{0}").format(exc))
+            logger.debug(traceback.format_exc())
+            logger.error(
+                _("[ConnectWebSocket] [🚫 WebSocket 连接被拒绝] | [错误：{0}]").format(
+                    exc
+                )
+            )
+            raise APIConnectionError(
+                _("[ConnectWebSocket] [❌ WebSocket 连接失败] | [服务器：{0}]").format(
+                    exc
+                )
+            )
 
         except websockets.InvalidStatusCode as exc:
-            logger.error(traceback.format_exc())
-            logger.error(_("WebSocket 连接状态码无效：{0}").format(exc))
+            logger.debug(traceback.format_exc())
+            logger.error(
+                _("[ConnectWebSocket] [⚠️ 无效状态码] | [状态码：{0}]").format(exc)
+            )
             await asyncio.sleep(2)
             await self.connect_websocket(websocket_uri)
 
@@ -455,45 +513,69 @@ class WebSocketCrawler:
         """
         接收 WebSocket 消息并处理
         """
-        timeout_count = 0
-        try:
-            while True:
-                try:
-                    # 为wss连接设置10秒超时机制
-                    logger.info(
-                        _("等待接收消息，超时时间：{0} 秒").format(self.timeout)
-                    )
-                    message = await asyncio.wait_for(
-                        self.websocket.recv(), timeout=self.timeout
-                    )
-                    timeout_count = 0  # 重置超时计数
-                    await self.on_message(message)
-                except asyncio.TimeoutError:
-                    logger.warning(_("接收消息超时"))
-                    timeout_count += 1
-                    if timeout_count >= 3:
-                        await self.on_close(_("即将关闭 WebSocket 连接"))
-                        return "closed"
-                    if self.websocket.closed:
-                        await self.on_close(_("即将关闭 WebSocket 连接"))
-                        return "closed"
-                except ConnectionClosedError as exc:
-                    logger.error(traceback.format_exc())
-                    await self.on_close(_("WebSocket 连接被关闭：{0}").format(exc))
-                    return "closed"
-                except ConnectionClosedOK:
-                    await self.on_close(_("WebSocket 连接正常关闭"))
-                    return "closed"
-                except Exception as exc:
-                    logger.error(traceback.format_exc())
-                    logger.error(_("处理消息时出错：{0}").format(exc))
-                    await self.on_error(exc)
-                    return "error"
 
-        except Exception as e:
-            logger.error(traceback.format_exc())
-            logger.error(_("接收消息过程中出错：{0}").format(e))
-            return "error"
+        logger.info(_("[ReceiveMessages] [📩 开始接收消息]"))
+        logger.info(
+            _("[ReceiveMessages] [⏱ 消息等待超时：{0} 秒]").format(self.timeout)
+        )
+
+        timeout_count = 0
+
+        while True:
+            try:
+                message = await asyncio.wait_for(
+                    self.websocket.recv(), timeout=self.timeout
+                )
+                # 为wss连接设置10秒超时机制
+                timestamp = timestamp_2_str(time.time(), "%Y-%m-%d %H:%M:%S")
+                logger.info(
+                    _("[ReceiveMessages] | [⏳ 接收消息 {0}]").format(timestamp)
+                )
+
+                timeout_count = 0  # 重置超时计数
+                await self.on_message(message)
+
+            except asyncio.TimeoutError:
+                timeout_count += 1
+                logger.warning(
+                    _("[ReceiveMessages] [⚠️ 超时] | [超时次数：{0} / 3]").format(
+                        timeout_count
+                    )
+                )
+                if timeout_count >= 3:
+                    logger.warning(
+                        _(
+                            "[ReceiveMessages] [❌ 超时关闭连接] | "
+                            "[超时次数：{0}] [连接状态：{1}]"
+                        ).format(timeout_count, self.websocket.closed)
+                    )
+                    return "closed"
+                if self.websocket.closed:
+                    logger.warning(
+                        _(
+                            "[ReceiveMessages] [🔒 远程服务器关闭] | [WebSocket 连接结束]"
+                        )
+                    )
+                    return "closed"
+            except ConnectionClosedError as exc:
+                logger.debug(traceback.format_exc())
+                logger.warning(
+                    _("[ReceiveMessages] [🔌 连接关闭] | [原因：{0}]").format(exc)
+                )
+                return "closed"
+
+            except ConnectionClosedOK:
+                logger.info(
+                    _("[ReceiveMessages] [✔️ 正常关闭] | [WebSocket 连接正常关闭]")
+                )
+                return "closed"
+
+            except Exception as exc:
+                logger.debug(traceback.format_exc())
+                logger.error(
+                    _("[ReceiveMessages] [⚠️ 消息处理错误] | [错误：{0}]").format(exc)
+                )
+                return "error"
 
     async def close_websocket(self):
         """
@@ -501,7 +583,7 @@ class WebSocketCrawler:
         """
         if self.websocket:
             await self.websocket.close()
-            logger.info(_("已关闭 WebSocket 连接"))
+            logger.debug(_("[CloseWebSocket] [🔒 WebSocket 已关闭]"))
 
     async def on_message(self, message):
         """
@@ -510,7 +592,7 @@ class WebSocketCrawler:
         Args:
             message: WebSocket 消息
         """
-        logger.debug(_("收到消息：{0}").format(message))
+        logger.debug(_("[OnMessage] [📩 收到消息] | [内容：{0}]").format(message))
 
     async def on_error(self, message):
         """
@@ -519,7 +601,7 @@ class WebSocketCrawler:
         Args:
             message: WebSocket 错误
         """
-        logger.error(_("WebSocket 错误：{0}").format(message))
+        logger.error(_("[OnError] [⚠️ 错误] | [内容：{0}]").format(message))
 
     async def on_close(self, message):
         """
@@ -528,13 +610,13 @@ class WebSocketCrawler:
         Args:
             message: WebSocket 关闭消息
         """
-        logger.warning(message)
+        logger.info(_("[OnClose] [🔒 连接关闭] | [关闭原因：{0}]").format(message))
 
     async def on_open(self):
         """
         处理 WebSocket 打开
         """
-        logger.info(_("WebSocket 连接已打开"))
+        logger.info(_("[OnOpen] [🌐 连接已打开] | [WebSocket 连接成功]"))
 
     async def __aenter__(self):
         """

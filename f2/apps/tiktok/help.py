@@ -83,7 +83,7 @@ def help() -> None:
             "-P --proxies",
             "[dark_cyan]str",
             _(
-                "代理服务器，最多 2 个参数，http://与https://。空格区分 2 个参数 http://x.x.x.x https://x.x.x.x"
+                "配置代理服务器，支持最多两个参数，分别对应 http:// 和 https:// 协议。如果代理不支持出口 HTTPS，请使用：http://x.x.x.x http://x.x.x.x"
             ),
         ),
         (
@@ -108,7 +108,7 @@ def help() -> None:
             "",
             "",
             _(
-                "更加详细的参数说明请点击[link=https://johnserf-seed.github.io/f2/site-config.html][dark_violet]前往文档[/dark_violet][/]查看"
+                "更加详细的参数说明请点击[link=https://f2.wiki/site-config][dark_violet]前往文档[/dark_violet][/]查看"
             ),
         ),
     ]

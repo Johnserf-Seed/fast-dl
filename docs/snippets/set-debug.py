@@ -1,21 +1,22 @@
-// #region set-config-snippet
+# region set-config-snippet
 import f2
 
 f2.APP_CONFIG_FILE_PATH = "app.yaml"
 
-// #endregion set-config-snippet
+# endregion set-config-snippet
 
 
-// #region set-debug-snippet
+# region set-debug-snippet
 import asyncio
 from f2.apps.douyin.handler import DouyinHandler
 
-from f2.log.logger import logger    # [!code focus]
-logger.setLevel("WARNING")    # [!code focus]
+from f2.log.logger import logger  # [!code focus]
+
+logger.setLevel("WARNING")  # [!code focus]
 
 kwargs = {
     "headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
         "Referer": "https://www.douyin.com/",
     },
     "proxies": {"http://": None, "https://": None},
@@ -23,29 +24,31 @@ kwargs = {
 }
 
 if __name__ == "__main__":
-    asyncio.run(DouyinHandler(kwargs).fetch_user_post(
-        "MS4wLjABAAAA35iXl5qqCbLKY99pUvxkXzvpSXi8jgUbJ0zR4EuTpcHcS8PHaEb6G9yB6iKR0dNl"
+    asyncio.run(
+        DouyinHandler(kwargs).fetch_user_post(
+            "MS4wLjABAAAA35iXl5qqCbLKY99pUvxkXzvpSXi8jgUbJ0zR4EuTpcHcS8PHaEb6G9yB6iKR0dNl"
         )
     )
 
-// #endregion set-debug-snippet
+# endregion set-debug-snippet
 
 
-// #region cli-debug-snippet
-f2 -d WARNING -M post -u https://www.douyin.com/user/MS4wLjABAAAA35iXl5qqCbLKY99pUvxkXzvpSXi8jgUbJ0zR4EuTpcHcS8PHaEb6G9yB6iKR0dNl
-// #endregion cli-debug-snippet
+# region cli-debug-snippet
+# f2 -d WARNING dy -M post -u https://www.douyin.com/user/MS4wLjABAAAA35iXl5qqCbLKY99pUvxkXzvpSXi8jgUbJ0zR4EuTpcHcS8PHaEb6G9yB6iKR0dNl
+# endregion cli-debug-snippet
 
 
-// #region log-2-console-snippet
+# region log-2-console-snippet
 import asyncio
 from f2.apps.douyin.handler import DouyinHandler
 
-from f2.log.logger import log_setup    # [!code focus]
-logger = log_setup(log_to_console=True)    # [!code focus]
+from f2.log.logger import log_setup  # [!code focus]
+
+logger = log_setup(log_to_console=True)  # [!code focus]
 
 kwargs = {
     "headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
         "Referer": "https://www.douyin.com/",
     },
     "proxies": {"http://": None, "https://": None},
@@ -53,9 +56,10 @@ kwargs = {
 }
 
 if __name__ == "__main__":
-    asyncio.run(DouyinHandler(kwargs).fetch_user_post(
-        "MS4wLjABAAAA35iXl5qqCbLKY99pUvxkXzvpSXi8jgUbJ0zR4EuTpcHcS8PHaEb6G9yB6iKR0dNl"
+    asyncio.run(
+        DouyinHandler(kwargs).fetch_user_post(
+            "MS4wLjABAAAA35iXl5qqCbLKY99pUvxkXzvpSXi8jgUbJ0zR4EuTpcHcS8PHaEb6G9yB6iKR0dNl"
         )
     )
 
-// #endregion log-2-console-snippet
+# endregion log-2-console-snippet

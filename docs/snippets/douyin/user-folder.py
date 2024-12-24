@@ -1,10 +1,10 @@
-// #region create-user-folder
+# region create-user-folder
 from f2.apps.douyin.utils import create_user_folder
 
 
 kwargs = {
     "headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
         "Referer": "https://www.douyin.com/",
     },
     "proxies": {"http": None, "https": None},
@@ -19,10 +19,10 @@ if __name__ == "__main__":
     print(create_user_folder(kwargs, current_nickname))
     # X:\......\Download\douyin\post\New Nickname
 
-// #endregion create-user-folder
+# endregion create-user-folder
 
 
-// #region rename-user-folder
+# region rename-user-folder
 import asyncio
 from f2.apps.douyin.db import AsyncUserDB
 from f2.apps.douyin.utils import rename_user_folder
@@ -31,7 +31,7 @@ from f2.apps.douyin.handler import DouyinHandler
 
 kwargs = {
     "headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
         "Referer": "https://www.douyin.com/",
     },
     "proxies": {"http://": None, "https://": None},
@@ -56,7 +56,8 @@ async def main():
     print(new_user_path)
     # X:\......\Download\douyin\post\New Nickname
 
+
 if __name__ == "__main__":
     asyncio.run(main())
 
-// #endregion rename-user-folder
+# endregion rename-user-folder

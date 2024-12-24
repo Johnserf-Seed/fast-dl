@@ -1,11 +1,15 @@
 # path: f2/apps/tiktok/models.py
 
+import traceback
+
 from typing import Any
 from pydantic import BaseModel
 from urllib.parse import quote, unquote
 
 from f2.apps.tiktok.utils import TokenManager, ClientConfManager
 from f2.utils.utils import get_timestamp
+from f2.i18n.translator import _
+from f2.log.logger import logger
 
 
 # Model
@@ -21,15 +25,13 @@ class BaseRequestModel(BaseModel):
     browser_version: str = quote(
         ClientConfManager.brm_browser().get(
             "version",
-            "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+            "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
         ),
         safe="",
     )
     channel: str = "tiktok_web"
     cookie_enabled: str = "true"
-    device_id: str = ClientConfManager.brm_device().get(
-        "id", "7379572768071239176"
-    )  # 风控参数
+    device_id: str = ClientConfManager.brm_device().get("id", "")  # 风控参数
     device_platform: str = ClientConfManager.brm_device().get("platform", "web_pc")
     focus_state: str = "true"
     from_page: str = "user"
@@ -56,10 +58,41 @@ class BaseRequestModel(BaseModel):
     )
     try:
         msToken: str = TokenManager.gen_real_msToken()
-    except Exception as e:
-        print(f"Error generating msToken: {e}")
+    except Exception:
+        logger.warning(_("msToken 生成失败，使用虚假 msToken"))
+        logger.debug(traceback.format_exc())
         # 发生异常时，重新生成msToken，不生成虚假msToken
         msToken: str = TokenManager.gen_real_msToken()
+
+
+class BaseWebCastModel(BaseModel):
+    aid: str = "1988"
+    app_language: str = "zh-Hans"
+    app_name: str = "tiktok_web"
+    browser_language: str = ClientConfManager.brm_browser().get("language", "zh-CN")
+    browser_name: str = ClientConfManager.brm_browser().get("name", "Mozilla")
+    browser_online: str = "true"
+    browser_platform: str = ClientConfManager.brm_browser().get("platform", "Win32")
+    browser_version: str = quote(
+        ClientConfManager.brm_browser().get(
+            "version",
+            "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+        ),
+        safe="",
+    )
+    cookie_enabled: str = "true"
+    debug: str = "false"
+    device_platform: str = "web"
+    host: str = quote("https://webcast.tiktok.com", safe="")
+    identity: str = "audience"
+    live_id: int = 12
+    screen_height: int = 1080
+    screen_width: int = 1920
+    sup_ws_ds_opt: int = 1
+    tz_name: str = quote(
+        ClientConfManager.base_request_model().get("tz_name", "Asia/Hong_Kong"), safe=""
+    )
+    version_code: str = "270000"
 
 
 # router model
@@ -144,3 +177,35 @@ class UserLive(BaseRequestModel):
 class CheckLiveAlive(BaseRequestModel):
     from_page: str = "live"
     room_ids: str
+
+
+class LiveImFetch(BaseWebCastModel):
+    # resp_content_type: str = "protobuf"
+    device_id: str = ""
+    did_rule: int = 3
+    resp_content_type: str = "protobuf"
+    fetch_rule: int = 1
+    cursor: str = ""
+    last_rtt: int = 0
+    internal_ext: str = ""
+    room_id: str
+    history_comment_count: int = 6
+    history_comment_cursor: str = "7386962392254958354"
+    try:
+        msToken: str = TokenManager.gen_real_msToken()
+    except Exception as e:
+        # 发生异常时，重新生成msToken，不生成虚假msToken
+        msToken: str = TokenManager.gen_real_msToken()
+    _signature: str
+
+
+class LiveWebcast(BaseWebCastModel):
+    compress: str = "gzip"
+    heartbeatDuration: int = 0
+    imprp: str = ""
+    room_id: str
+    cursor: str
+    internal_ext: str
+    update_version_code: str = "1.3.0"
+    webcast_sdk_version: str = "1.3.0"
+    wrss: str

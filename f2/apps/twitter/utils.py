@@ -4,19 +4,23 @@ import f2
 import re
 import httpx
 import asyncio
+import traceback
+
 from typing import Union
 from pathlib import Path
+from urllib.parse import urlparse
 
 from f2.i18n.translator import _
+from f2.log.logger import logger
 from f2.utils.conf_manager import ConfigManager
 from f2.utils.utils import extract_valid_urls, split_filename
+from f2.crawlers.base_crawler import BaseCrawler
 from f2.exceptions.api_exceptions import (
-    APIError,
     APIConnectionError,
     APIResponseError,
-    APIUnavailableError,
     APIUnauthorizedError,
     APINotFoundError,
+    APITimeoutError,
 )
 
 
@@ -33,7 +37,7 @@ class ClientConfManager:
         return cls.twitter_conf
 
     @classmethod
-    def version(cls) -> str:
+    def conf_version(cls) -> str:
         return cls.client_conf.get("version", "unknown")
 
     @classmethod
@@ -82,7 +86,7 @@ class ModelManager:
         return final_endpoint
 
 
-class UserIdFetcher:
+class UniqueIdFetcher(BaseCrawler):
     # https://x.com/CaroylnG61544
     # https://x.com/CaroylnG61544/
     # https://x.com/CaroylnG61544/followers
@@ -90,12 +94,12 @@ class UserIdFetcher:
     # https://twitter.com/CaroylnG61544/status/1440000000000000000/photo/1
 
     # 预编译正则表达式
-    _USER_ID_PATTERN = re.compile(
+    _UNIQUE_ID_PATTERN = re.compile(
         r"(?:https?://)?(?:www\.)?(twitter\.com|x\.com)/(?:@)?([a-zA-Z0-9_]+)"
     )
 
     @classmethod
-    async def get_user_id(cls, url: str) -> str:
+    async def get_unique_id(cls, url: str) -> str:
         """
         从用户URL中提取用户ID
         (Extract user ID from user URL)
@@ -104,7 +108,7 @@ class UserIdFetcher:
             url (str): 用户URL (User URL)
 
         Returns:
-            str: 用户ID (User ID)
+            str: 用户唯一ID (User Unique Id)
         """
 
         if not isinstance(url, str):
@@ -113,28 +117,100 @@ class UserIdFetcher:
         # 提取有效URL
         url = extract_valid_urls(url)
 
-        match = cls._USER_ID_PATTERN.search(url)
+        if url is None:
+            raise (
+                APINotFoundError(_("输入的URL不合法。类名：{0}").format(cls.__name__))
+            )
 
-        if match:
-            return match.group(2)
-        else:
-            raise APINotFoundError(
+        # 创建一个实例以访问 aclient
+        instance = cls()
+
+        try:
+            headers = {
+                "User-Agent": ClientConfManager.user_agent(),
+                "Referer": url,
+            }
+            response = await instance.aclient.get(
+                url, headers=headers, follow_redirects=True
+            )
+
+            match = cls._UNIQUE_ID_PATTERN.search(str(response.url))
+            if match:
+                return match.group(2)
+            else:
+                raise APIResponseError(
+                    _(
+                        "未在响应的地址中找到unique_id，检查链接是否为用户链接。类名：{0}"
+                    ).format(cls.__name__)
+                )
+
+        except httpx.TimeoutException as exc:
+            logger.error(traceback.format_exc())
+            raise APITimeoutError(
                 _(
-                    "未在响应的地址中找到user_id，检查链接是否为用户链接。类名：{0}"
-                ).format(cls.__name__)
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(
+                    "请求端点超时",
+                    url,
+                    cls.proxies,
+                    cls.__name__,
+                    exc,
+                )
+            )
+
+        except httpx.NetworkError as exc:
+            logger.error(traceback.format_exc())
+            raise APIConnectionError(
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(
+                    "网络连接失败，请检查当前网络环境",
+                    url,
+                    cls.proxies,
+                    cls.__name__,
+                    exc,
+                )
+            )
+
+        except httpx.ProtocolError as exc:
+            logger.error(traceback.format_exc())
+            raise APIUnauthorizedError(
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(
+                    "请求协议错误",
+                    url,
+                    cls.proxies,
+                    cls.__name__,
+                    exc,
+                )
+            )
+
+        except httpx.ProxyError as exc:
+            logger.error(traceback.format_exc())
+            raise APIConnectionError(
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(
+                    "请求代理错误",
+                    url,
+                    cls.proxies,
+                    cls.__name__,
+                    exc,
+                )
             )
 
     @classmethod
-    async def get_all_user_ids(cls, urls: list) -> list:
+    async def get_all_unique_ids(cls, urls: list) -> list:
         """
-        从用户URL列表中提取所有用户ID
-        (Extract all user IDs from the list of user URLs)
+        从用户URL列表中提取所有用户唯一ID
+        (Extract all unique ids from the list of user URLs)
 
         Args:
             urls (list): 用户URL列表 (List of user URLs)
 
         Returns:
-            list: 用户ID列表 (List of user IDs)
+            list: 用户唯一ID列表 (List of unique ids)
         """
 
         if not isinstance(urls, list):
@@ -151,11 +227,11 @@ class UserIdFetcher:
                 )
             )
 
-        user_ids = [cls.get_user_id(url) for url in urls]
-        return await asyncio.gather(*user_ids)
+        unique_ids = [cls.get_unique_id(url) for url in urls]
+        return await asyncio.gather(*unique_ids)
 
 
-class TweetIdFetcher:
+class TweetIdFetcher(BaseCrawler):
     # 预编译正则表达式
     _TWEET_URL_PATTERN = re.compile(
         r"(?:https?://)?(?:www\.)?(?:twitter|x)\.com/.*/status/(\d+)(?:/|\?|#.*$|$)"
@@ -185,40 +261,45 @@ class TweetIdFetcher:
                 APINotFoundError(_("输入的URL不合法。类名：{0}").format(cls.__name__))
             )
 
-        if "t.co" in url:
-            try:
-                transport = httpx.AsyncHTTPTransport(retries=5)
-                async with httpx.AsyncClient(
-                    transport=transport, proxies=ClientConfManager.proxies(), timeout=10
-                ) as client:
-                    response = await client.get(
-                        url, headers=ClientConfManager.headers(), follow_redirects=True
-                    )
-                    url = response.text
-                    response.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                raise APINotFoundError(
-                    _("未找到推文，请检查推文链接是否正确。类名：{0}").format(
-                        cls.__name__
-                    ),
-                    e.response.status_code,
-                )
-            except httpx.RequestError as exc:
-                raise APIConnectionError(
-                    _(
-                        "请求端点失败，请检查当前网络环境。 链接：{0}，代理：{1}，异常类名：{2}，异常详细信息：{3}"
-                    ).format(url, ClientConfManager.proxies(), cls.__name__, exc)
-                )
+        # 创建一个实例以访问 aclient
+        instance = cls()
 
-        match = cls._TWEET_URL_PATTERN.search(url)
+        # 解析URL并检查主机
+        parsed_url = urlparse(url)
+        host = parsed_url.hostname
 
-        if match:
-            return match.group(1)
-        else:
+        if host is None:
             raise APINotFoundError(
+                "无法解析URL的主机部分。类名：{0}".format(cls.__name__)
+            )
+        try:
+            if "t.co" in host:
+                response = await instance.aclient.get(
+                    url, headers=ClientConfManager.headers(), follow_redirects=True
+                )
+                url = response.text
+
+            match = cls._TWEET_URL_PATTERN.search(url)
+            if match:
+                return match.group(1)
+            else:
+                raise APIResponseError(
+                    _(
+                        "未在响应的地址中找到tweet_id，检查链接是否为推文链接。类名：{0}"
+                    ).format(cls.__name__),
+                    response.status_code,
+                )
+
+        except httpx.HTTPStatusError:
+            raise APINotFoundError(
+                _("未找到推文，请检查推文链接是否正确。类名：{0}").format(cls.__name__)
+            )
+
+        except httpx.RequestError as exc:
+            raise APIConnectionError(
                 _(
-                    "未在响应的地址中找到tweet_id，检查链接是否为推文链接。类名：{0}"
-                ).format(cls.__name__)
+                    "请求端点失败，请检查当前网络环境。 链接：{0}，代理：{1}，异常类名：{2}，异常详细信息：{3}"
+                ).format(url, ClientConfManager.proxies(), cls.__name__, exc)
             )
 
     @classmethod
@@ -262,8 +343,8 @@ def format_file_name(
     (Format file name according to the global conf file)
 
     Args:
-        tweet_data (dict): 微博数据的字典 (dict of douyin data)
         naming_template (str): 文件的命名模板, 如 "{create}_{desc}" (Naming template for files, such as "{create}_{desc}")
+        tweet_data (dict): 推文数据的字典 (dict of twitter data)
         custom_fields (dict): 用户自定义字段, 用于替代默认的字段值 (Custom fields for replacing default field values)
 
     Note:
@@ -288,7 +369,7 @@ def format_file_name(
         "linux": 60,
     }
     fields = {
-        "create": tweet_data.get("tweet_created_time", ""),  # 长度固定19
+        "create": tweet_data.get("tweet_created_at", ""),  # 长度固定19
         "nickname": tweet_data.get("nickname", ""),  # 不固定
         "tweet_id": tweet_data.get("tweet_id", ""),  # 长度固定19
         "desc": split_filename(tweet_data.get("tweet_desc", ""), os_limit),
@@ -392,27 +473,23 @@ def rename_user_folder(old_path: Path, new_nickname: str) -> Path:
     return new_path
 
 
-def create_or_rename_user_folder(
-    kwargs: dict, local_user_data: dict, current_nickname: str
-) -> Path:
+def extract_desc(text):
     """
-    创建或重命名用户目录 (Create or rename user directory)
+    提取推特标题，抛弃从 "https" 开始及其后的内容，包括其前一个空格。
 
     Args:
-        kwargs (dict): 配置参数 (Conf parameters)
-        local_user_data (dict): 本地用户数据 (Local user data)
-        current_nickname (str): 当前用户昵称 (Current user nickname)
+        text (str): 原始推文内容
 
     Returns:
-        user_path (Path): 用户目录路径 (User directory path)
+        str: 提取后的标题
     """
-    user_path = create_user_folder(kwargs, current_nickname)
 
-    if not local_user_data:
-        return user_path
+    text = text.strip()  # 去掉两端空格
+    https_index = text.find("https")  # 查找 "https" 的起始位置
 
-    if local_user_data.get("nickname") != current_nickname:
-        # 昵称不一致，触发目录更新操作
-        user_path = rename_user_folder(user_path, current_nickname)
-
-    return user_path
+    if https_index != -1:  # 如果存在 "https"
+        # 找到 "https" 前第一个空格的位置
+        cutoff_index = text.rfind(" ", 0, https_index)
+        if cutoff_index != -1:
+            return text[:cutoff_index].strip()  # 返回截断后的部分
+    return text.strip()  # 如果没有 "https"，返回去掉两端空格后的内容

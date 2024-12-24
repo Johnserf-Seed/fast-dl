@@ -4,12 +4,12 @@ douyin:
   lyric:
   cover:
   desc:
-  path:
+  path: Download
   folderize:
   mode:
   naming:
   cookie:
-  interval:
+  interval: all
   timeout:
   max_retries:
   max_connections:
@@ -23,13 +23,13 @@ tiktok:
   music:
   cover:
   desc:
-  path:
+  path: Download
   folderize:
   mode:
   naming:
   cookie:
   keyword:
-  interval:
+  interval: all
   timeout:
   max_connections:
   max_counts:
@@ -40,13 +40,13 @@ tiktok:
 
 weibo:
   url:
-  path:
+  path: Download
   folderize:
   mode:
   naming:
   cookie:
   keyword:
-  interval:
+  interval: all
   timeout:
   max_retries:
   max_connections:
@@ -55,14 +55,14 @@ weibo:
   page_counts:
   languages:
 
-x:
+twitter:
   url:
-  path:
+  path: Download
   folderize:
   mode:
   naming:
   cookie:
-  interval:
+  interval: all
   timeout:
   max_retries:
   max_connections:
@@ -70,3 +70,23 @@ x:
   max_tasks:
   page_counts:
   languages:
+
+bark:
+  key:
+  token:
+  title:
+  body:
+  mode:
+  retry:
+  ringtones:
+  icon:
+  level:
+  volume:
+  call:
+  isArchive:
+  sound:
+  autoCopy:
+  call:
+  copy:
+  group:
+  badge:

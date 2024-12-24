@@ -1,7 +1,8 @@
 # path: f2/apps/douyin/filter.py
 
+from typing import List, Dict, Any
 from f2.utils.json_filter import JSONModel
-from f2.utils.utils import _get_first_item_from_list, timestamp_2_str, replaceT
+from f2.utils.utils import timestamp_2_str, replaceT, filter_to_list
 
 # Filter
 
@@ -119,10 +120,10 @@ class UserProfileFilter(JSONModel):
     def user_age(self):
         return self._get_attr_value("$.user.user_age")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -212,6 +213,23 @@ class UserPostFilter(JSONModel):
         ]
 
     @property
+    def images_video(self):
+        images_video_list = self._get_list_attr_value("$.aweme_list[*].images")
+
+        return [
+            (
+                [
+                    live["video"]["play_addr"]["url_list"][0]
+                    for live in images_video
+                    if isinstance(live, dict) and "video" in live
+                ]
+                if images_video
+                else None
+            )
+            for images_video in images_video_list
+        ]
+
+    @property
     def animated_cover(self):
         # 临时办法
         # https://github.com/h2non/jsonpath-ng/issues/82
@@ -239,7 +257,9 @@ class UserPostFilter(JSONModel):
 
     @property
     def video_play_addr(self):
-        return self._get_list_attr_value("$.aweme_list[*].video.play_addr.url_list")
+        return self._get_list_attr_value(
+            "$.aweme_list[*].video.bit_rate[0].play_addr.url_list"
+        )
 
     @property
     def video_bit_rate(self):
@@ -296,8 +316,7 @@ class UserPostFilter(JSONModel):
 
     @property
     def music_play_url(self):
-        url_list = self._get_list_attr_value("$.aweme_list[*].music.play_url.url_list")
-        return _get_first_item_from_list(url_list)
+        return self._get_list_attr_value("$.aweme_list[*].music.play_url.url_list[0]")
 
     @property
     def has_more(self) -> bool:
@@ -311,18 +330,18 @@ class UserPostFilter(JSONModel):
     def min_cursor(self):
         return self._get_attr_value("$.min_cursor")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
             if not prop_name.startswith("__") and not prop_name.startswith("_")
         }
 
-    def _to_list(self):
-        exclude_list = [
+    def _to_list(self) -> list:
+        exclude_fields = [
             "status_code",
             "has_more",
             "max_cursor",
@@ -331,29 +350,20 @@ class UserPostFilter(JSONModel):
             "locate_item_cursor",
         ]
 
-        keys = [
-            prop_name
-            for prop_name in dir(self)
-            if not prop_name.startswith("__")
-            and not prop_name.startswith("_")
-            and prop_name not in exclude_list
+        extra_fields = [
+            "status_code",
+            "has_more",
+            "max_cursor",
+            "min_cursor",
         ]
 
-        aweme_entries = self._get_attr_value("$.aweme_list") or []
+        list_dicts = filter_to_list(
+            self,
+            "$.aweme_list",
+            exclude_fields,
+            extra_fields,
+        )
 
-        list_dicts = []
-        for entry in aweme_entries:
-            d = {
-                "status_code": self.status_code,
-                "has_more": self.has_more,
-                "max_cursor": self.max_cursor,
-                "min_cursor": self.min_cursor,
-            }
-            for key in keys:
-                attr_values = getattr(self, key)
-                index = aweme_entries.index(entry)
-                d[key] = attr_values[index] if index < len(attr_values) else None
-            list_dicts.append(d)
         return list_dicts
 
 
@@ -479,10 +489,10 @@ class UserCollectsFilter(JSONModel):
     def uid(self):
         return self._get_list_attr_value("$.collects_list[*].user_info.uid")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -605,42 +615,38 @@ class UserMusicCollectionFilter(JSONModel):
     def sec_uid(self):
         return self._get_list_attr_value("$.mc_list[*].sec_uid")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
             if not prop_name.startswith("__") and not prop_name.startswith("_")
         }
 
-    def _to_list(self):
-        exclude_list = ["has_more", "max_cursor", "status_code", "msg"]
-
-        keys = [
-            prop_name
-            for prop_name in dir(self)
-            if not prop_name.startswith("__")
-            and not prop_name.startswith("_")
-            and prop_name not in exclude_list
+    def _to_list(self) -> list:
+        exclude_fields = [
+            "has_more",
+            "max_cursor",
+            "status_code",
+            "msg",
         ]
 
-        aweme_entries = self._get_attr_value("$.mc_list") or []
+        extra_fields = [
+            "has_more",
+            "max_cursor",
+            "status_code",
+            "msg",
+        ]
 
-        list_dicts = []
-        for entry in aweme_entries:
-            d = {
-                "has_more": self.has_more,
-                "max_cursor": self.max_cursor,
-                "status_code": self.status_code,
-                "msg": self.msg,
-            }
-            for key in keys:
-                attr_values = getattr(self, key)
-                index = aweme_entries.index(entry)
-                d[key] = attr_values[index] if index < len(attr_values) else None
-            list_dicts.append(d)
+        list_dicts = filter_to_list(
+            self,
+            "$.mc_list",
+            exclude_fields,
+            extra_fields,
+        )
+
         return list_dicts
 
 
@@ -835,18 +841,18 @@ class UserFollowingFilter(JSONModel):
     def unique_id(self):
         return self._get_list_attr_value("$.followings[*].unique_id")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
             if not prop_name.startswith("__") and not prop_name.startswith("_")
         }
 
-    def _to_list(self):
-        exclude_list = [
+    def _to_list(self) -> list:
+        exclude_fields = [
             "status_code",
             "status_msg",
             "has_more",
@@ -858,32 +864,23 @@ class UserFollowingFilter(JSONModel):
             "min_time",
         ]
 
-        keys = [
-            prop_name
-            for prop_name in dir(self)
-            if not prop_name.startswith("__")
-            and not prop_name.startswith("_")
-            and prop_name not in exclude_list
+        extra_fields = [
+            "has_more",
+            "total",
+            "mix_count",
+            "offset",
+            "myself_user_id",
+            "max_time",
+            "min_time",
         ]
 
-        following_entries = self._get_attr_value("$.followings") or []
+        list_dicts = filter_to_list(
+            self,
+            "$.followings",
+            exclude_fields,
+            extra_fields,
+        )
 
-        list_dicts = []
-        for entry in following_entries:
-            d = {
-                "has_more": self.has_more,
-                "total": self.total,
-                "mix_count": self.mix_count,
-                "offset": self.offset,
-                "myself_user_id": self.myself_user_id,
-                "max_time": self.max_time,
-                "min_time": self.min_time,
-            }
-            for key in keys:
-                attr_values = getattr(self, key)
-                index = following_entries.index(entry)
-                d[key] = attr_values[index] if index < len(attr_values) else None
-            list_dicts.append(d)
         return list_dicts
 
 
@@ -1015,8 +1012,8 @@ class UserFollowerFilter(UserFollowingFilter):
     def unique_id(self):
         return self._get_list_attr_value("$.followers[*].unique_id")
 
-    def _to_list(self):
-        exclude_list = [
+    def _to_list(self) -> list:
+        exclude_fields = [
             "status_code",
             "status_msg",
             "has_more",
@@ -1028,32 +1025,23 @@ class UserFollowerFilter(UserFollowingFilter):
             "min_time",
         ]
 
-        keys = [
-            prop_name
-            for prop_name in dir(self)
-            if not prop_name.startswith("__")
-            and not prop_name.startswith("_")
-            and prop_name not in exclude_list
+        extra_fields = [
+            "has_more",
+            "total",
+            "mix_count",
+            "offset",
+            "myself_user_id",
+            "max_time",
+            "min_time",
         ]
 
-        following_entries = self._get_attr_value("$.followers") or []
+        list_dicts = filter_to_list(
+            self,
+            "$.followers",
+            exclude_fields,
+            extra_fields,
+        )
 
-        list_dicts = []
-        for entry in following_entries:
-            d = {
-                "has_more": self.has_more,
-                "total": self.total,
-                "mix_count": self.mix_count,
-                "offset": self.offset,
-                "myself_user_id": self.myself_user_id,
-                "max_time": self.max_time,
-                "min_time": self.min_time,
-            }
-            for key in keys:
-                attr_values = getattr(self, key)
-                index = following_entries.index(entry)
-                d[key] = attr_values[index] if index < len(attr_values) else None
-            list_dicts.append(d)
         return list_dicts
 
 
@@ -1407,17 +1395,25 @@ class PostDetailFilter(JSONModel):
 
     @property
     def video_play_addr(self):
-        return self._get_attr_value("$.aweme_detail.video.play_addr.url_list")
+        return self._get_attr_value(
+            "$.aweme_detail.video.bit_rate[0].play_addr.url_list"
+        )
 
     # images
     @property
     def images(self):
         return self._get_list_attr_value("$.aweme_detail.images[*].url_list[0]")
 
-    def _to_raw(self) -> dict:
+    @property
+    def images_video(self):
+        return self._get_list_attr_value(
+            "$.aweme_detail.images[*].video.play_addr.url_list[0]"
+        )
+
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -1536,10 +1532,10 @@ class UserLiveFilter(JSONModel):
     def ShareAuth(self):
         return self._get_attr_value("$.data.data[0].room_auth.Share")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -1654,10 +1650,10 @@ class UserLive2Filter(JSONModel):
     def sec_uid(self):
         return self._get_attr_value("$.data.room.owner.sec_uid")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -1858,8 +1854,26 @@ class FriendFeedFilter(JSONModel):
         ]
 
     @property
+    def images_video(self):
+        images_list = self._get_list_attr_value("$.data[*].aweme.images")
+        return [
+            (
+                [
+                    img["video"]["play_addr"]["url_list"][0]
+                    for img in images
+                    if isinstance(img, dict) and "video" in img
+                ]
+                if images
+                else None
+            )
+            for images in images_list
+        ]
+
+    @property
     def video_play_addr(self):
-        return self._get_list_attr_value("$.data[*].aweme.video.play_addr.url_list")
+        return self._get_list_attr_value(
+            "$.data[*].aweme.video.bit_rate[0].play_addr.url_list"
+        )
 
     # music
     @property
@@ -1900,18 +1914,18 @@ class FriendFeedFilter(JSONModel):
     def music_title_raw(self):
         return self._get_list_attr_value("$.data[*].aweme.music.title")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
             if not prop_name.startswith("__") and not prop_name.startswith("_")
         }
 
-    def _to_list(self):
-        exclude_list = [
+    def _to_list(self) -> list:
+        exclude_fields = [
             "status_code",
             "status_msg",
             "has_more",
@@ -1920,31 +1934,21 @@ class FriendFeedFilter(JSONModel):
             "cursor",
             "level",
         ]
-
-        keys = [
-            prop_name
-            for prop_name in dir(self)
-            if not prop_name.startswith("__")
-            and not prop_name.startswith("_")
-            and prop_name not in exclude_list
+        extra_fields = [
+            "has_more",
+            "has_aweme",
+            "friend_update_count",
+            "cursor",
+            "level",
         ]
 
-        friend_feed_entries = self._get_attr_value("$.data") or []
+        list_dicts = filter_to_list(
+            self,
+            "$.data",
+            exclude_fields,
+            extra_fields,
+        )
 
-        list_dicts = []
-        for entry in friend_feed_entries:
-            d = {
-                "has_more": self.has_more,
-                "has_aweme": self.has_aweme,
-                "friend_update_count": self.friend_update_count,
-                "cursor": self.cursor,
-                "level": self.level,
-            }
-            for key in keys:
-                attr_values = getattr(self, key)
-                index = friend_feed_entries.index(entry)
-                d[key] = attr_values[index] if index < len(attr_values) else None
-            list_dicts.append(d)
         return list_dicts
 
 
@@ -2005,10 +2009,10 @@ class GetQrcodeFilter(JSONModel):
     def message(self):
         return self._get_attr_value("$.message")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -2045,10 +2049,10 @@ class CheckQrcodeFilter(JSONModel):
     def verify_ticket(self):
         return self._get_attr_value("$.verify_ticket")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -2085,10 +2089,10 @@ class LiveImFetchFilter(JSONModel):
     def now(self):
         return timestamp_2_str(str(self._get_attr_value("$.extra.now")))
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -2137,10 +2141,10 @@ class QueryUserFilter(JSONModel):
     def user_uid_type(self):
         return self._get_attr_value("$.user_uid_type")
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
@@ -2263,38 +2267,40 @@ class FollowingUserLiveFilter(JSONModel):
             "$.data.data.[*].room.stream_url.stream_orientation"
         )
 
-    def _to_raw(self) -> dict:
+    def _to_raw(self) -> Dict:
         return self._data
 
-    def _to_dict(self) -> dict:
+    def _to_dict(self) -> Dict:
         return {
             prop_name: getattr(self, prop_name)
             for prop_name in dir(self)
             if not prop_name.startswith("__") and not prop_name.startswith("_")
         }
 
-    def _to_list(self):
-        exclude_list = [
+    def _to_list(self) -> list:
+        exclude_fields = [
             "status_code",
             "status_msg",
         ]
+        extra_fields = []
 
-        keys = [
-            prop_name
-            for prop_name in dir(self)
-            if not prop_name.startswith("__")
-            and not prop_name.startswith("_")
-            and prop_name not in exclude_list
-        ]
+        list_dicts = filter_to_list(
+            self,
+            "$.data.data",
+            exclude_fields,
+            extra_fields,
+        )
 
-        friend_feed_entries = self._get_attr_value("$.data.data") or []
-
-        list_dicts = []
-        for entry in friend_feed_entries:
-            d = {}
-            for key in keys:
-                attr_values = getattr(self, key)
-                index = friend_feed_entries.index(entry)
-                d[key] = attr_values[index] if index < len(attr_values) else None
-            list_dicts.append(d)
         return list_dicts
+
+
+class PostStatsFilter(JSONModel):
+
+    # 0 正常 5 参数不合法 2863 您的操作过于频繁，请稍后再试
+    @property
+    def status_code(self):
+        return self._get_attr_value("$.status_code")
+
+    @property
+    def status_msg(self):
+        return self._get_attr_value("$.status_msg")

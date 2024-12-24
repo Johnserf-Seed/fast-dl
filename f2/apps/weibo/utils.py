@@ -7,13 +7,14 @@ import asyncio
 
 from typing import Union
 from pathlib import Path
+from urllib.parse import unquote
 
 from f2.i18n.translator import _
 from f2.log.logger import logger
 from f2.utils.conf_manager import ConfigManager
 from f2.utils.utils import extract_valid_urls, split_filename, split_set_cookie
+from f2.crawlers.base_crawler import BaseCrawler
 from f2.exceptions.api_exceptions import (
-    APIError,
     APIConnectionError,
     APIResponseError,
     APIUnavailableError,
@@ -35,7 +36,7 @@ class ClientConfManager:
         return cls.weibo_conf
 
     @classmethod
-    def version(cls) -> str:
+    def conf_version(cls) -> str:
         return cls.client_conf.get("version", "unknown")
 
     @classmethod
@@ -78,18 +79,26 @@ class ModelManager:
         return final_endpoint
 
 
-class VisitorManager:
+class VisitorManager(BaseCrawler):
     """
-    用于管理访客信息 (Used to manage visitor information)
+    用于管理访客Cookie生成 (Used to manage visitor information)
     """
 
     visitor_conf = ClientConfManager.visitor()
     proxies = ClientConfManager.proxies()
 
+    visitor_headers = {
+        "User-Agent": ClientConfManager.user_agent(),
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+
+    def __init__(self):
+        super().__init__(proxies=self.proxies)
+
     @classmethod
     async def gen_visitor(cls) -> str:
         """
-        生成访客信息 (Generate visitor information)
+        生成访客Cookie (Generate visitor information)
 
         Args:
             kwargs (dict): 配置参数 (Conf parameters)
@@ -98,58 +107,55 @@ class VisitorManager:
             str: 访客cookie (Visitor cookie)
         """
 
-        payload = {
-            "cb": cls.visitor_conf["cb"],
-            "tid": cls.visitor_conf["tid"],
-            "from": cls.visitor_conf["from"],
-        }
-        headers = {
-            "User-Agent": ClientConfManager.user_agent(),
-            "Content-Type": "application/x-www-form-urlencoded",
-        }
-        transport = httpx.AsyncHTTPTransport(retries=5)
-        async with httpx.AsyncClient(
-            transport=transport, proxies=cls.proxies, timeout=10
-        ) as aclient:
-            try:
-                response = await aclient.post(
-                    url=cls.visitor_conf["url"],
-                    data=payload,
-                    headers=headers,
+        instance = cls()
+
+        try:
+            payload = {
+                "cb": instance.visitor_conf["cb"],
+                "tid": instance.visitor_conf["tid"],
+                "from": instance.visitor_conf["from"],
+            }
+
+            response = await instance.aclient.post(
+                instance.visitor_conf["url"],
+                data=payload,
+                headers=instance.visitor_headers,
+            )
+            response.raise_for_status()
+
+            visitor_cookie = split_set_cookie(response.headers.get("set-cookie", ""))
+            return visitor_cookie
+
+        except httpx.RequestError as exc:
+            # 捕获所有与 httpx 请求相关的异常情况 (Captures all httpx request-related exceptions)
+            raise APIConnectionError(
+                _(
+                    "请求端点失败，请检查当前网络环境。 链接：{0}，代理：{1}，异常类名：{2}，异常详细信息：{3}"
+                ).format(
+                    instance.visitor_conf["url"],
+                    instance.proxies,
+                    instance.__name__,
+                    exc,
                 )
-                response.raise_for_status()
+            )
 
-                visitor_cookie = split_set_cookie(
-                    response.headers.get("set-cookie", "")
-                )
-
-                return visitor_cookie
-
-            except httpx.RequestError as exc:
-                # 捕获所有与 httpx 请求相关的异常情况 (Captures all httpx request-related exceptions)
-                raise APIConnectionError(
+        except httpx.HTTPStatusError as e:
+            # 捕获 httpx 的状态代码错误 (captures specific status code errors from httpx)
+            if e.response.status_code == 401:
+                raise APIUnauthorizedError(
                     _(
-                        "请求端点失败，请检查当前网络环境。 链接：{0}，代理：{1}，异常类名：{2}，异常详细信息：{3}"
-                    ).format(cls.visitor_conf["url"], cls.proxies, cls.__name__, exc)
+                        "参数验证失败，请更新 F2 配置文件中的 {0}，以匹配 {1} 新规则"
+                    ).format("visitor", "weibo")
                 )
 
-            except httpx.HTTPStatusError as e:
-                # 捕获 httpx 的状态代码错误 (captures specific status code errors from httpx)
-                if e.response.status_code == 401:
-                    raise APIUnauthorizedError(
-                        _(
-                            "参数验证失败，请更新 F2 配置文件中的 {0}，以匹配 {1} 新规则"
-                        ).format("visitor", "weibo")
+            elif e.response.status_code == 404:
+                raise APINotFoundError(_("{0} 无法找到API端点").format("visitor"))
+            else:
+                raise APIResponseError(
+                    _("链接：{0}，状态码 {1}：{2} ").format(
+                        str(e.response.url), e.response.status_code, e.response.text
                     )
-
-                elif e.response.status_code == 404:
-                    raise APINotFoundError(_("{0} 无法找到API端点").format("visitor"))
-                else:
-                    raise APIResponseError(
-                        _("链接：{0}，状态码 {1}：{2} ").format(
-                            e.response.url, e.response.status_code, e.response.text
-                        )
-                    )
+                )
 
 
 class WeiboIdFetcher:
@@ -323,6 +329,93 @@ class WeiboUidFetcher:
         return await asyncio.gather(*weibo_uids)
 
 
+class WeiboScreenNameFetcher:
+    # 预编译正则表达式
+    # (Pre-compile regular expression)
+
+    # https://weibo.com/n/%E8%87%AA%E6%88%91%E5%85%85%E7%94%B5%E5%8A%9F%E8%83%BD%E4%B8%A7%E5%A4%B1
+    # https://weibo.com/n/%E8%87%AA%E6%88%91%E5%85%85%E7%94%B5%E5%8A%9F%E8%83%BD%E4%B8%A7%E5%A4%B1/
+    # https://weibo.com/n/%E8%87%AA%E6%88%91%E5%85%85%E7%94%B5%E5%8A%9F%E8%83%BD%E4%B8%A7%E5%A4%B1?test=123
+    # https://weibo.com/n/%E8%87%AA%E6%88%91%E5%85%85%E7%94%B5%E5%8A%9F%E8%83%BD%E4%B8%A7%E5%A4%B1/?test=123
+    # https://weibo.com/n/自我充电功能丧失
+    # https://weibo.com/n/自我充电功能丧失/
+    # https://weibo.com/n/自我充电功能丧失?test=123
+    # https://weibo.com/n/自我充电功能丧失/?test=123
+
+    _WEIBO_COM_NAME_PATTERN = re.compile(
+        r"(?:https?://)?(?:www\.)?(?:weibo\.com|weibo\.cn|m\.weibo\.cn)/n/([^/?#]+)"
+    )
+
+    @classmethod
+    async def get_weibo_screen_name(cls, url: str) -> str:
+        """
+        从微博链接中提取URL编码的昵称并解码
+        (Extract encoded name from weibo link and decode it)
+
+        Args:
+            url (str): 微博链接 (Weibo link)
+
+        Returns:
+            str: 解码后的微博名称 (Decoded Weibo name)
+        """
+        if not url:
+            raise ValueError("微博链接不能为空")
+
+        if not isinstance(url, str):
+            raise TypeError("参数必须是字符串类型")
+
+        # 提取有效URL
+        url = extract_valid_urls(url)
+
+        if url is None:
+            raise (
+                APINotFoundError(_("输入的URL不合法。类名：{0}").format(cls.__name__))
+            )
+
+        match = cls._WEIBO_COM_NAME_PATTERN.search(url)
+        if match:
+            # URL解码
+            return unquote(match.group(1))
+        else:
+            raise APINotFoundError(
+                _(
+                    "未在响应的地址中找到screen_name，检查链接是否为微博昵称链接。类名：{0}"
+                ).format(cls.__name__)
+            )
+
+    @classmethod
+    async def get_all_weibo_screen_name(cls, urls: list) -> list:
+        """
+        从微博链接列表中提取URL编码的昵称并解码
+        (Extract encoded name from weibo link list and decode it)
+
+        Args:
+            urls (list): 微博链接 (Weibo link list)
+
+        Returns:
+            list: 解码后的微博名称列表 (Decoded Weibo name list)
+        """
+        if not urls:
+            raise ValueError(_("微博链接列表不能为空"))
+
+        if not isinstance(urls, list):
+            raise TypeError(_("参数必须是列表类型"))
+
+        # 提取有效URL
+        urls = extract_valid_urls(urls)
+
+        # 从链接中提取微博ID
+        if urls == []:
+            raise (
+                APINotFoundError(
+                    _("输入的URL List不合法。类名：{0}").format(cls.__name__)
+                )
+            )
+
+        weibo_screen_names = [cls.get_weibo_screen_name(url) for url in urls]
+        return await asyncio.gather(*weibo_screen_names)
+
+
 def format_file_name(
     naming_template: str,
     weibo_data: dict = {},
@@ -333,8 +426,8 @@ def format_file_name(
     (Format file name according to the global conf file)
 
     Args:
-        weibo_data (dict): 微博数据的字典 (dict of douyin data)
         naming_template (str): 文件的命名模板, 如 "{create}_{desc}" (Naming template for files, such as "{create}_{desc}")
+        weibo_data (dict): 微博数据的字典 (dict of weibo data)
         custom_fields (dict): 用户自定义字段, 用于替代默认的字段值 (Custom fields for replacing default field values)
 
     Note:
@@ -360,10 +453,10 @@ def format_file_name(
     }
 
     fields = {
-        "create": weibo_data.get("create_time", ""),  # 长度固定19
+        "create": weibo_data.get("weibo_created_at", ""),  # 长度固定19
         "nickname": weibo_data.get("nickname", ""),  # 最长30
         "weibo_id": weibo_data.get("weibo_id", ""),  # 长度固定19
-        "desc": split_filename(weibo_data.get("descRaw", ""), os_limit),
+        "desc": split_filename(weibo_data.get("weibo_desc", ""), os_limit),
         "uid": weibo_data.get("uid", ""),  # 固定10
     }
 
@@ -464,27 +557,23 @@ def rename_user_folder(old_path: Path, new_nickname: str) -> Path:
     return new_path
 
 
-def create_or_rename_user_folder(
-    kwargs: dict, local_user_data: dict, current_nickname: str
-) -> Path:
+def extract_desc(text):
     """
-    创建或重命名用户目录 (Create or rename user directory)
+    提取微博标题，抛弃从 "http" 开始及其后的内容，包括其前一个空格。
 
     Args:
-        kwargs (dict): 配置参数 (Conf parameters)
-        local_user_data (dict): 本地用户数据 (Local user data)
-        current_nickname (str): 当前用户昵称 (Current user nickname)
+        text (str): 原始微博内容
 
     Returns:
-        user_path (Path): 用户目录路径 (User directory path)
+        str: 提取后的标题
     """
-    user_path = create_user_folder(kwargs, current_nickname)
 
-    if not local_user_data:
-        return user_path
+    text = text.strip()  # 去掉两端空格
+    http_index = text.find("http")  # 查找 "http" 的起始位置
 
-    if local_user_data.get("nickname") != current_nickname:
-        # 昵称不一致，触发目录更新操作
-        user_path = rename_user_folder(user_path, current_nickname)
-
-    return user_path
+    if http_index != -1:  # 如果存在 "http"
+        # 找到 "http" 前第一个空格的位置
+        cutoff_index = text.rfind(" ", 0, http_index)
+        if cutoff_index != -1:
+            return text[:cutoff_index].strip()  # 返回截断后的部分
+    return text.strip()  # 如果没有 "http"，返回去掉两端空格后的内容

@@ -48,6 +48,10 @@ class ClientConfManager:
         return cls.client_conf.get("version", "unknown")
 
     @classmethod
+    def wss(cls) -> dict:
+        return cls.client().get("wss", {})
+
+    @classmethod
     def base_request_model(cls) -> dict:
         return cls.client().get("BaseRequestModel", {})
 
@@ -360,7 +364,7 @@ class TokenManager(BaseCrawler):
                 instance.odin_tt_conf["url"],
                 headers=instance.odin_tt_headers,
             )
-            response.raise_for_status()
+            # response.raise_for_status()
 
             odin_tt = httpx.Cookies(response.cookies).get("odin_tt")
 
@@ -440,7 +444,7 @@ class XBogusManager:
         try:
             final_endpoint = XB(user_agent).getXBogus(endpoint)
         except Exception as e:
-            raise RuntimeError(_("生成X-Bogus失败: {0})").format(e))
+            raise ValueError(_("生成X-Bogus失败: {0})").format(e))
 
         return final_endpoint[0]
 
@@ -460,7 +464,7 @@ class XBogusManager:
         try:
             xb_value = XB(user_agent).getXBogus(param_str)
         except Exception as e:
-            raise RuntimeError(_("生成X-Bogus失败: {0})").format(e))
+            raise ValueError(_("生成X-Bogus失败: {0})").format(e))
 
         # 检查base_endpoint是否已有查询参数 (Check if base_endpoint already has query parameters)
         separator = "&" if "?" in base_endpoint else "?"
@@ -549,23 +553,31 @@ class SecUserIdFetcher(BaseCrawler):
         """
 
         if not isinstance(url, str):
-            raise TypeError("输入参数必须是字符串")
+            raise TypeError(_("输入参数必须是字符串"))
 
         url = extract_valid_urls(url)
 
         if url is None:
-            raise APINotFoundError("输入的URL不合法。类名：{0}".format(cls.__name__))
+            raise APINotFoundError(_("输入的URL不合法。类名：{0}").format(cls.__name__))
 
         # 创建一个实例以访问 aclient
         instance = cls()
 
         try:
-            response = await instance.aclient.get(url, follow_redirects=True)
+            headers = {
+                "User-Agent": ClientConfManager.user_agent(),
+                "Referer": url,
+            }
+            response = await instance.aclient.get(
+                url, headers=headers, follow_redirects=True
+            )
             if response.status_code in {200, 444}:
                 if cls._TIKTOK_NOTFOUND_PARREN.search(str(response.url)):
                     raise APINotFoundError(
-                        "页面不可用，可能是由于区域限制（代理）造成的。类名：{0}"
-                    ).format(cls.__name__)
+                        _(
+                            "页面不可用，可能是由于区域限制（代理）造成的。类名：{0}"
+                        ).format(cls.__name__)
+                    )
 
                 match = cls._TIKTOK_SECUID_PARREN.search(str(response.text))
                 if not match:
@@ -577,29 +589,41 @@ class SecUserIdFetcher(BaseCrawler):
 
                 data = json.loads(match.group(1))
                 default_scope = data.get("__DEFAULT_SCOPE__", {})
-                user_detail = default_scope.get("webapp.user-detail", {})
-                user_info = user_detail.get("userInfo", {}).get("user", {})
-                sec_uid = user_info.get("secUid")
+
+                if "/video/" in url:
+                    video_detail = default_scope.get("webapp.video-detail", {})
+                    user_info = (
+                        video_detail.get("itemInfo", {})
+                        .get("itemStruct", {})
+                        .get("author", {})
+                    )
+                    sec_uid = user_info.get("secUid", None)
+                else:
+                    user_detail = default_scope.get("webapp.user-detail", {})
+                    user_info = user_detail.get("userInfo", {}).get("user", {})
+                    sec_uid = user_info.get("secUid", None)
 
                 if sec_uid is None:
-                    raise RuntimeError(_("获取 {0} 失败").format("sec_uid"))
+                    raise ValueError(_("获取 {0} 失败").format("sec_uid"))
 
                 return sec_uid
             else:
-                raise ConnectionError("接口状态码异常，请检查重试")
+                raise APIResponseError(_("接口状态码异常，请检查重试"))
 
         except httpx.TimeoutException as exc:
             logger.error(traceback.format_exc())
             raise APITimeoutError(
-                "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}".format(
-                    "请求端点超时", url, cls.proxies, cls.__name__, exc
-                )
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format("请求端点超时", url, cls.proxies, cls.__name__, exc)
             )
 
         except httpx.NetworkError as exc:
             logger.error(traceback.format_exc())
             raise APIConnectionError(
-                "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}".format(
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(
                     "网络连接失败，请检查当前网络环境",
                     url,
                     cls.proxies,
@@ -611,23 +635,23 @@ class SecUserIdFetcher(BaseCrawler):
         except httpx.ProtocolError as exc:
             logger.error(traceback.format_exc())
             raise APIUnauthorizedError(
-                "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}".format(
-                    "请求协议错误", url, cls.proxies, cls.__name__, exc
-                )
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format("请求协议错误", url, cls.proxies, cls.__name__, exc)
             )
 
         except httpx.ProxyError as exc:
             logger.error(traceback.format_exc())
             raise APIConnectionError(
-                "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}".format(
-                    "请求代理错误", url, cls.proxies, cls.__name__, exc
-                )
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format("请求代理错误", url, cls.proxies, cls.__name__, exc)
             )
 
         except httpx.HTTPStatusError as exc:
             logger.error(traceback.format_exc())
             raise APIResponseError(
-                "{0}。链接：{1} 代理：{2}，异常类名：{3}，异常详细信息：{4}".format(
+                _("{0}。链接：{1} 代理：{2}，异常类名：{3}，异常详细信息：{4}").format(
                     "状态码错误", url, cls.proxies, cls.__name__, exc
                 )
             )
@@ -654,8 +678,8 @@ class SecUserIdFetcher(BaseCrawler):
         urls = extract_valid_urls(urls)
 
         if urls == []:
-            raise APINotFoundError(
-                "输入的URL List不合法。类名：{0}".format(cls.__name__)
+            raise APINotFoundError("输入的URL List不合法。类名：{0}").format(
+                cls.__name__
             )
 
         secuids = [cls.get_secuid(url) for url in urls]
@@ -683,7 +707,7 @@ class SecUserIdFetcher(BaseCrawler):
         """
 
         if not isinstance(url, str):
-            raise TypeError("输入参数必须是字符串")
+            raise TypeError(_("输入参数必须是字符串"))
 
         url = extract_valid_urls(url)
 
@@ -694,12 +718,21 @@ class SecUserIdFetcher(BaseCrawler):
         instance = cls()
 
         try:
-            response = await instance.aclient.get(url, follow_redirects=True)
+            headers = {
+                "User-Agent": ClientConfManager.user_agent(),
+                "Referer": url,
+            }
+            response = await instance.aclient.get(
+                url, headers=headers, follow_redirects=True
+            )
+
             if response.status_code in {200, 444}:
                 if cls._TIKTOK_NOTFOUND_PARREN.search(str(response.url)):
                     raise APINotFoundError(
-                        "页面不可用，可能是由于区域限制（代理）造成的。类名：{0}"
-                    ).format(cls.__name__)
+                        _(
+                            "页面不可用，可能是由于区域限制（代理）造成的。类名：{0}"
+                        ).format(cls.__name__)
+                    )
 
                 match = cls._TIKTOK_UNIQUEID_PARREN.search(str(response.url))
                 if not match:
@@ -712,14 +745,14 @@ class SecUserIdFetcher(BaseCrawler):
                 unique_id = match.group(1)
 
                 if unique_id is None:
-                    raise RuntimeError(
-                        _("获取 {0} 失败，{1}").format("unique_id", response.url)
+                    raise ValueError(
+                        _("获取 {0} 失败，{1}").format("unique_id", str(response.url))
                     )
 
                 return unique_id
 
             else:
-                raise ConnectionError("接口状态码异常，请检查重试")
+                raise APIResponseError(_("接口状态码异常，请检查重试"))
 
         except httpx.TimeoutException as exc:
             logger.error(traceback.format_exc())
@@ -898,9 +931,9 @@ class AwemeIdFetcher(BaseCrawler):
             if response.status_code in {200, 444}:
                 if cls._TIKTOK_NOTFOUND_PARREN.search(str(response.url)):
                     raise APINotFoundError(
-                        "页面不可用，可能是由于区域限制（代理）造成的。类名：{0}".format(
-                            cls.__name__
-                        )
+                        _(
+                            "页面不可用，可能是由于区域限制（代理）造成的。类名：{0}"
+                        ).format(cls.__name__)
                     )
 
                 match = cls._TIKTOK_AWEMEID_PARREN.search(str(response.url))
@@ -914,15 +947,13 @@ class AwemeIdFetcher(BaseCrawler):
                 aweme_id = match.group(1)
 
                 if aweme_id is None:
-                    raise RuntimeError(
-                        _("获取 {0} 失败，{1}").format("aweme_id", response.url)
+                    raise ValueError(
+                        _("获取 {0} 失败，{1}").format("aweme_id", str(response.url))
                     )
 
                 return aweme_id
             else:
-                raise ConnectionError(
-                    _("接口状态码异常 {0}，请检查重试").format(response.status_code)
-                )
+                raise APIResponseError(_("接口状态码异常，请检查重试"))
 
         except httpx.TimeoutException as exc:
             logger.error(traceback.format_exc())
@@ -1076,9 +1107,14 @@ class DeviceIdManager(BaseCrawler):
     _DEVICE_ID_URL = "https://www.tiktok.com/"
     _DEVICE_ID_FULL_URL = "https://www.tiktok.com/explore"
 
+    try:
+        _MSTOKEN = TokenManager.gen_real_msToken()
+    except Exception as e:
+        _MSTOKEN = TokenManager.gen_real_msToken()
+
     _DEVICE_ID_HEADERS = {
         "User-Agent": ClientConfManager.user_agent(),
-        "Cookie": f"msToken={TokenManager.gen_real_msToken()}",
+        "Cookie": f"msToken={_MSTOKEN}",
     }
     proxies = ClientConfManager.proxies()
 
@@ -1119,18 +1155,26 @@ class DeviceIdManager(BaseCrawler):
                 follow_redirects=True,
             )
             response.raise_for_status()
-            data = instance._DEVICE_ID_PARTTERN.search(response.text).group(1).strip()
 
-            cookie = split_set_cookie(response.headers["Set-Cookie"])
-            deviceId = json.loads(data)["__DEFAULT_SCOPE__"]["webapp.app-context"][
-                "wid"
-            ]
+            # 增加检查匹配结果是否为 None 的逻辑
+            match = instance._DEVICE_ID_PARTTERN.search(response.text)
+            if match is None:
+                raise APIResponseError(_("未能找到所需的设备 ID 信息"))
+
+            data = match.group(1).strip()
+            cookie = split_set_cookie(response.headers.get("Set-Cookie", ""))
+            deviceId = (
+                json.loads(data)
+                .get("__DEFAULT_SCOPE__", {})
+                .get("webapp.app-context", {})
+                .get("wid")
+            )
 
             if deviceId is None:
-                raise APIResponseError(_("{0}生成失败").format("deviceId"))
+                raise APIResponseError(_("{0} 生成失败").format("deviceId"))
 
             if cookie is None:
-                raise APIResponseError(_("{0}生成失败").format("tt_chain_token"))
+                raise APIResponseError(_("{0} 生成失败").format("tt_chain_token"))
 
             return {"deviceId": deviceId, "cookie": cookie}
 
@@ -1209,6 +1253,7 @@ class DeviceIdManager(BaseCrawler):
 
         if count > 10:
             logger.warning(_("生成设备 ID 数量过多，可能会导致请求失败。"))
+            count = 10
 
         tasks = [cls.gen_device_id(full_cookie) for _ in range(count)]
         results = await asyncio.gather(*tasks)
@@ -1229,8 +1274,8 @@ def format_file_name(
     (Format file name according to the global conf file)
 
     Args:
-        aweme_data (dict): 抖音数据的字典 (dict of douyin data)
         naming_template (str): 文件的命名模板, 如 "{create}_{desc}" (Naming template for files, such as "{create}_{desc}")
+        aweme_data (dict): 抖音数据的字典 (dict of tiktok data)
         custom_fields (dict): 用户自定义字段, 用于替代默认的字段值 (Custom fields for replacing default field values)
 
     Note:

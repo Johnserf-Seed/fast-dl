@@ -2,7 +2,7 @@
 
 import pytest
 import datetime
-from f2.utils.utils import gen_random_str, get_timestamp
+from f2.utils.utils import gen_random_str, get_timestamp, merge_config
 
 
 def test_gen_random_str():
@@ -66,24 +66,48 @@ def test_get_timestamp():
     )
 
     # Test invalid unit
-    with pytest.raises(ValueError, match="Unsupported time unit"):
+    with pytest.raises(ValueError, match="不支持的时间单位"):
         get_timestamp("invalid_unit")
 
 
-if __name__ == "__main__":
-    from f2.apps.douyin.utils import TokenManager
+def test_merge_config():
+    # 测试主配置为空
+    with pytest.raises(ValueError, match="主配置参数不能为空"):
+        merge_config({}, {"key": "value"})
 
-    print("douyin real msToken:", TokenManager.gen_real_msToken())
-    print("douyin fake msToken:", TokenManager.gen_false_msToken())
-    print("douyin ttwid:", TokenManager.gen_ttwid())
+    # 测试自定义配置为空
+    with pytest.raises(ValueError, match="自定义配置参数不能为空或空字典"):
+        merge_config({"key": "value"}, {})
 
-    from f2.apps.douyin.utils import VerifyFpManager
+    # 测试主配置和自定义配置合并
+    main_conf = {"key1": "value1", "key2": "value2"}
+    custom_conf = {"key2": None, "key3": ""}
+    result = merge_config(main_conf, custom_conf)
+    expected = {
+        "key1": "value1",  # 主配置保留
+        "key2": "value2",  # 自定义配置的 None 不覆盖主配置
+    }
+    assert result == expected
 
-    print("douyin verify_fp:", VerifyFpManager.gen_verify_fp())
+    # 测试 CLI 参数覆盖自定义配置和主配置
+    cli_args = {"key2": "cli_value2", "key4": "cli_value4"}
+    result = merge_config(main_conf, custom_conf, **cli_args)
+    expected = {
+        "key1": "value1",  # 主配置保留
+        "key2": "cli_value2",  # CLI 参数覆盖
+        "key4": "cli_value4",  # CLI 参数新增
+    }
+    assert result == expected
 
-    from f2.apps.tiktok.utils import TokenManager
-
-    print("tiktok real msToken:", TokenManager.gen_real_msToken())
-    print("tiktok fake msToken:", TokenManager.gen_false_msToken())
-    print("tiktok ttwid:", TokenManager.gen_ttwid())
-    print("tiktok odin_tt:", TokenManager.gen_odin_tt())
+    # 测试空值和 None 不会覆盖已有值
+    custom_conf = {"key2": None, "key3": ""}
+    cli_args = {"key3": None, "key4": ""}
+    result = merge_config(main_conf, custom_conf, **cli_args)
+    expected = {
+        "key1": "value1",  # 主配置保留
+        "key2": "value2",  # 自定义配置的 None 不覆盖主配置
+    }
+    assert result["key1"] == "value1"
+    assert result["key2"] == "value2"
+    assert "key3" not in result  # 空值不应新增键
+    assert "key4" not in result  # 空值不应新增键

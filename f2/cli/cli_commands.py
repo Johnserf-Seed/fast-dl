@@ -9,17 +9,11 @@ import traceback
 
 from f2 import helps
 from f2.apps import __apps__ as apps_module
-from f2.exceptions import APIError
 from f2.cli.cli_console import RichConsoleManager
 from f2.utils._signal import SignalManager
-from f2.utils.utils import get_latest_version
+from f2.utils.utils import check_f2_version, check_python_version
 from f2.i18n.translator import _
 from f2.log.logger import logger
-
-from concurrent.futures import ThreadPoolExecutor
-
-from rich.panel import Panel
-from rich.console import Console
 
 
 # 处理帮助信息
@@ -73,45 +67,9 @@ def handle_last_version(
     if not value or ctx.resilient_parsing:
         return
 
-    asyncio.run(check_version())
+    asyncio.run(check_f2_version())
 
     ctx.exit()
-
-
-async def check_version():
-    """用于检查F2的版本是否最新"""
-
-    latest_version = await get_latest_version("f2")
-
-    if latest_version:
-        if f2.__version__ > latest_version:
-            message = (
-                f"您当前使用的版本 {f2.__version__} 可能已过时，请考虑及时升级到最新版本 {latest_version}，"
-                "使用 pip install -U f2 更新"
-            )
-            Console().print(
-                Panel(
-                    message,
-                    title="版本警告",
-                    subtitle="请及时更新",
-                    style="bold red",
-                    border_style="red",
-                )
-            )
-        elif f2.__version__ == latest_version:
-            message = f"您当前使用的是最新版本：{f2.__version__}"
-            Console().print(
-                Panel(
-                    message, title="版本检查", style="bold green", border_style="green"
-                )
-            )
-    else:
-        message = "无法获取最新版本信息"
-        Console().print(
-            Panel(
-                message, title=_("网络超时"), style="bold yellow", border_style="yellow"
-            )
-        )
 
 
 def run_async_in_thread(coro):
@@ -144,9 +102,7 @@ class DynamicGroup(click.Group):
         try:
             if app_name:
                 # 使用线程池执行异步任务
-                executor = ThreadPoolExecutor(max_workers=1)
-                executor.submit(run_async_in_thread, check_version())
-
+                asyncio.run(check_f2_version())
                 # 动态导入app的cli模块
                 module = importlib.import_module(f"f2.apps.{app_name}.cli")
                 logger.info(_("应用：{0}").format(app_name))
@@ -192,27 +148,25 @@ class DynamicGroup(click.Group):
     help=_("检查F2版本"),
 )
 def main(**kwargs):
-    pass
+    # 注册关闭信号
+    SignalManager().register_shutdown_signal()
+    # 检查Python版本是否符合要求
+    check_python_version()
 
 
 @click.pass_context
-def set_cli_config(ctx, **kwargs):
+def set_cli_config(ctx: click.Context, **kwargs):
     """
     设置CLI的配置参数, 使其可以在后续的命令或操作中使用
     (Set the conf of the CLI so that it can be used in subsequent commands)
 
     Args:
-    - ctx: click的上下文对象
-    - **kwargs: 关键字参数，代表CLI的各种设置选项
+        ctx: click的上下文对象
+        **kwargs: 关键字参数，代表CLI的各种设置选项
     """
 
-    SignalManager().register_shutdown_signal()
-
     with RichConsoleManager().progress:
-        try:
-            asyncio.run(run_app(kwargs))
-        except APIError as e:
-            logger.error(e)
+        asyncio.run(run_app(kwargs))
 
 
 async def run_app(kwargs):

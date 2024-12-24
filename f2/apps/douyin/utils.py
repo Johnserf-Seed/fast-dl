@@ -8,12 +8,14 @@ import httpx
 import qrcode
 import random
 import asyncio
+import warnings
 import traceback
 
 from typing import Union
 from pathlib import Path
 from urllib.parse import urlparse
-from f2.apps.douyin.algorithm import webcast_signature
+
+from f2.apps.douyin.algorithm.webcast_signature import DouyinWebcastSignature
 from f2.i18n.translator import _
 from f2.log.logger import logger
 from f2.utils.xbogus import XBogus as XB
@@ -29,7 +31,6 @@ from f2.crawlers.base_crawler import BaseCrawler
 from f2.exceptions.api_exceptions import (
     APIConnectionError,
     APIResponseError,
-    APIUnavailableError,
     APIUnauthorizedError,
     APINotFoundError,
     APITimeoutError,
@@ -95,6 +96,10 @@ class ClientConfManager:
     @classmethod
     def headers(cls) -> dict:
         return cls.client().get("headers", {})
+
+    @classmethod
+    def wss(cls) -> dict:
+        return cls.client().get("wss", {})
 
     @classmethod
     def user_agent(cls) -> str:
@@ -551,13 +556,21 @@ class WebcastSignatureManager:
         base_endpoint: str,
         params: dict,
     ) -> str:
+        warnings.warn(
+            _(
+                "WebcastSignatureManager.model_2_endpoint 方法已弃用，将在未来版本中移除。"
+            ),
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
         if not isinstance(params, dict):
             raise TypeError(_("参数必须是字典类型"))
 
         param_str = ",".join([f"{k}={v}" for k, v in params.items()])
 
         try:
-            signature = webcast_signature(user_agent).get_signature(param_str)
+            signature = DouyinWebcastSignature(user_agent).get_signature(param_str)
         except Exception as e:
             logger.error(traceback.format_exc())
             raise RuntimeError(_("生成signature失败: {0})").format(e))
@@ -724,14 +737,22 @@ class SecUserIdFetcher(BaseCrawler):
         if url is None:
             raise APINotFoundError(_("输入的URL不合法。类名：{0}").format(cls.__name__))
 
-        # 创建一个实例以访问 aclient
-        instance = cls()
+        # 解析URL并检查主机
+        parsed_url = urlparse(url)
+        host = parsed_url.hostname
+
+        if host is None:
+            raise APINotFoundError(
+                _("无法解析URL的主机部分。类名：{0}".format(cls.__name__))
+            )
 
         pattern = (
             cls._REDIRECT_URL_PATTERN
-            if urlparse(url).hostname == "v.douyin.com"
+            if host == "v.douyin.com" or host.endswith(".v.douyin.com")
             else cls._DOUYIN_URL_PATTERN
         )
+        # 创建一个实例以访问 aclient
+        instance = cls()
 
         try:
             response = await instance.aclient.get(url, follow_redirects=True)
@@ -900,14 +921,15 @@ class AwemeIdFetcher(BaseCrawler):
             match = video_pattern.search(str(response.url))
             if match:
                 aweme_id = match.group(1)
+            elif match := note_pattern.search(str(response.url)):
+                aweme_id = match.group(1)
             else:
-                match = note_pattern.search(str(response.url))
-                if match:
-                    aweme_id = match.group(1)
-                else:
-                    raise APIResponseError(
-                        _("未在响应的地址中找到aweme_id，检查链接是否为作品页")
-                    )
+                raise APIResponseError(
+                    _(
+                        "未在响应的地址中找到aweme_id，当前链接暂时不支持。类名：{0}"
+                    ).format(cls.__name__)
+                )
+
             return aweme_id
 
         except httpx.TimeoutException as exc:
@@ -1144,12 +1166,14 @@ class WebCastIdFetcher(BaseCrawler):
     类属性:
     - _DOUYIN_LIVE_URL_PATTERN (re.Pattern): 抖音直播 URL 的正则表达式模式。
     - _DOUYIN_LIVE_URL_PATTERN2 (re.Pattern): 抖音直播 URL 的第二种正则表达式模式。
-    - _DOUYIN_LIVE_URL_PATTERN3 (re.Pattern): 抖音直播 URL 的第三种正则表达式模式。
+    - _DOUYIN_ROOM_URL_PATTERN (re.Pattern): 抖音直播 URL 的第三种正则表达式模式。
     - proxies (dict): 代理配置。
 
     方法:
     - get_webcast_id: 从单个 URL 中获取 webcast_id。
     - get_all_webcast_id: 从 URL 列表中获取所有 webcast_id。
+    - get_room_id: 从单个 URL 中获取 room_id。
+    - get_all_room_id: 从 URL 列表中获取所有 room_id。
 
     异常处理:
     - 在 HTTP 请求过程中，处理可能出现的 TimeoutException、NetworkError、ProtocolError、ProxyError 和 HTTPStatusError 异常，并记录相应的错误信息。
@@ -1165,11 +1189,22 @@ class WebCastIdFetcher(BaseCrawler):
             "https://live.douyin.com/36299127202?enter_from_merge=link_share&enter_method=copy_link_share&action_type=click&from=web_code_link",
         ]
         webcast_ids = await WebCastIdFetcher.get_all_webcast_id(urls)
+
+        # 获取单个直播的 room_id (仅APP端分享链接)
+        url = "https://v.douyin.com/i8tBR7hX/"
+        room_id = await WebCastIdFetcher.get_room_id(url)
+
+        # 获取多个直播的 room_id (仅APP端分享链接)
+        urls = [
+            'https://webcast.amemv.com/douyin/webcast/reflow/7318296342189919011?u_code=l1j9bkbd&did=MS4wLjABAAAAEs86TBQPNwAo-RGrcxWyCdwKhI66AK3Pqf3ieo6HaxI&iid=MS4wLjABAAAA0ptpM-zzoliLEeyvWOCUt-_dQza4uSjlIvbtIazXnCY&with_sec_did=1&use_link_command=1&ecom_share_track_params=&extra_params={"from_request_id":"20231230162057EC005772A8EAA0199906","im_channel_invite_id":"0"}&user_id=3644207898042206&liveId=7318296342189919011&from=share&style=share&enter_method=click_share&roomId=7318296342189919011&activity_info={}',
+            "https://v.douyin.com/i8tBR7hX/",
+        ]
+        room_ids = await WebCastIdFetcher.get_all_room_id(urls)
     """
 
     _DOUYIN_LIVE_URL_PATTERN = re.compile(r"live/([^/?]*)")
     _DOUYIN_LIVE_URL_PATTERN2 = re.compile(r"http[s]?://live.douyin.com/(\d+)")
-    _DOUYIN_LIVE_URL_PATTERN3 = re.compile(r"reflow/([^/?]*)")
+    _DOUYIN_ROOM_URL_PATTERN = re.compile(r"reflow/([^/?]*)")
     proxies = ClientConfManager.proxies()
 
     def __init__(self):
@@ -1213,17 +1248,18 @@ class WebCastIdFetcher(BaseCrawler):
 
             live_pattern = cls._DOUYIN_LIVE_URL_PATTERN
             live_pattern2 = cls._DOUYIN_LIVE_URL_PATTERN2
-            live_pattern3 = cls._DOUYIN_LIVE_URL_PATTERN3
+            room_pattern = cls._DOUYIN_ROOM_URL_PATTERN
 
             if live_pattern.search(url):
                 match = live_pattern.search(url)
             elif live_pattern2.search(url):
                 match = live_pattern2.search(url)
-            elif live_pattern3.search(url):
-                match = live_pattern3.search(url)
+            # 辅助用户使用新方法，因为大部分第一次使用的用户都不会使用新方法
+            elif room_pattern.search(url):
+                match = room_pattern.search(url)
                 logger.warning(
                     _(
-                        "该链接返回的是room_id，请使用`fetch_user_live_videos_by_room_id`接口"
+                        "该链接返回的是room_id，请使用`fetch_user_live_videos_by_room_id`接口处理APP端分享链接。"
                     )
                 )
             else:
@@ -1301,6 +1337,120 @@ class WebCastIdFetcher(BaseCrawler):
         webcast_ids = [cls.get_webcast_id(url) for url in urls]
         return await asyncio.gather(*webcast_ids)
 
+    @classmethod
+    async def get_room_id(cls, url: str) -> str:
+        """
+        从单个url中获取room_id (Get room_id from a single url)
+
+        Args:
+            url (str): 输入的url (Input url)
+
+        Returns:
+            str: 匹配到的room_id (Matched room_id)。
+
+        Raises:
+            TypeError: 参数不是字符串类型。
+            APINotFoundError: 输入的URL不合法。
+            APITimeoutError: 请求超时。
+            APIConnectionError: 网络连接失败。
+            APIUnauthorizedError: 请求协议错误。
+            APIResponseError: 未找到room_id或状态码错误。
+        """
+
+        if not isinstance(url, str):
+            raise TypeError(_("参数必须是字符串类型"))
+
+        # 提取有效URL
+        url = extract_valid_urls(url)
+
+        if url is None:
+            raise APINotFoundError(_("输入的URL不合法。类名：{0}").format(cls.__name__))
+
+        instance = cls()
+
+        try:
+            response = await instance.aclient.get(url, follow_redirects=True)
+            response.raise_for_status()
+            url = str(response.url)
+
+            pattern = cls._DOUYIN_ROOM_URL_PATTERN
+            match = pattern.search(url)
+            if match:
+                return match.group(1)
+            else:
+                raise APIResponseError(
+                    _("未在响应的地址中找到room_id，检查链接是否为直播页")
+                )
+
+        except httpx.TimeoutException as exc:
+            raise APITimeoutError(
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(_("请求端点超时"), url, cls.proxies, cls.__name__, exc)
+            )
+        except httpx.NetworkError as exc:
+            raise APIConnectionError(
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(
+                    _("网络连接失败，请检查当前网络环境"),
+                    url,
+                    cls.proxies,
+                    cls.__name__,
+                    exc,
+                )
+            )
+        except httpx.ProtocolError as exc:
+            raise APIUnauthorizedError(
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(_("请求协议错误"), url, cls.proxies, cls.__name__, exc)
+            )
+
+        except httpx.ProxyError as exc:
+            raise APIConnectionError(
+                _(
+                    "{0}。 链接：{1}，代理：{2}，异常类名：{3}，异常详细信息：{4}"
+                ).format(_("请求代理错误"), url, cls.proxies, cls.__name__, exc)
+            )
+
+        except httpx.HTTPStatusError as exc:
+            raise APIResponseError(
+                _("{0}。链接：{1} 代理：{2}，异常类名：{3}，异常详细信息：{4}").format(
+                    _("状态码错误"), url, cls.proxies, cls.__name__, exc
+                )
+            )
+
+    @classmethod
+    async def get_all_room_id(cls, urls: list) -> list:
+        """
+        获取直播room_id,传入列表url都可以解析出room_id (Get live room_id, pass in the list url can parse out room_id)
+
+        Args:
+            urls (list): 列表url (list url)
+
+        Returns:
+            list: 直播的唯一标识，返回列表 (The unique identifier of the live, return list)
+
+        Raises:
+            TypeError: 参数不是列表类型。
+            APINotFoundError: 输入的URL List不合法。
+        """
+
+        if not isinstance(urls, list):
+            raise TypeError(_("参数必须是列表类型"))
+
+        # 提取有效URL
+        urls = extract_valid_urls(urls)
+
+        if urls == []:
+            raise APINotFoundError(
+                _("输入的URL List不合法。类名：{0}").format(cls.__name__)
+            )
+
+        room_ids = [cls.get_room_id(url) for url in urls]
+        return await asyncio.gather(*room_ids)
+
 
 def format_file_name(
     naming_template: str,
@@ -1312,8 +1462,8 @@ def format_file_name(
     (Format file name according to the global conf file)
 
     Args:
-        aweme_data (dict): 抖音数据的字典 (dict of douyin data)
         naming_template (str): 文件的命名模板, 如 "{create}_{desc}" (Naming template for files, such as "{create}_{desc}")
+        aweme_data (dict): 抖音数据的字典 (dict of douyin data)
         custom_fields (dict): 用户自定义字段, 用于替代默认的字段值 (Custom fields for replacing default field values)
 
     Note:
@@ -1451,7 +1601,17 @@ def show_qrcode(qrcode_url: str, show_image: bool = False) -> None:
         qrcode_url (str): 登录二维码链接 (Login QR code link)
         show_image (bool): 是否显示图像，True 表示显示，False 表示在控制台显示
         (Whether to display the image, True means display, False means display in the console)
+
+    Deprecated:
+        show_qrcode() 方法已弃用，将在未来版本中移除。
+        (show_qrcode() method is deprecated and will be removed in future versions.)
     """
+    warnings.warn(
+        _("show_qrcode() 方法已弃用，将在未来版本中移除。"),
+        DeprecationWarning,
+        stacklevel=2,
+    )
+
     if show_image:
         # 创建并显示QR码图像
         qr_code_img = qrcode.make(qrcode_url)

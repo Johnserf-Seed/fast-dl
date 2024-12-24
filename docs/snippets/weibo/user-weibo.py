@@ -5,7 +5,7 @@ from f2.log.logger import logger
 
 kwargs = {
     "headers": {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
         "Referer": "https://www.weibo.com/",
     },
     "proxies": {"http://": None, "https://": None},
@@ -14,10 +14,22 @@ kwargs = {
 
 
 async def main():
-    weibo = await WeiboHandler(kwargs).fetch_one_weibo(weibo_id="O8DM0BLLm")
-    logger.info(
-        f"微博ID: {weibo.weibo_id}, 微博文案: {weibo.desc}, 作者昵称: {weibo.nickname}, 发布时间: {weibo.create_time}"
-    )
+    async for weibo_list in WeiboHandler(kwargs).fetch_user_weibo(
+        uid="2265830070",
+        page=1,
+        feature=1,
+        since_id="",
+        max_counts=20,
+    ):
+        # logger.info(
+        #     f"微博ID: {weibo_list.weibo_id}, 微博文案: {weibo_list.weibo_desc_raw}, 作者昵称: {weibo_list.weibo_user_name_raw}, 发布时间: {weibo_list.weibo_created_at}"
+        # )
+        logger.info("=================_to_raw================")
+        logger.info(weibo_list._to_raw())
+        # logger.info("=================_to_dict===============")
+        # logger.info(weibo_list._to_dict())
+        # logger.info("=================_to_list===============")
+        # logger.info(weibo_list._to_list())
 
 
 if __name__ == "__main__":

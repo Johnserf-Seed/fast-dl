@@ -13,18 +13,20 @@ class BaseRequestModel(BaseModel):
     aid: str = "6383"
     channel: str = "channel_pc_web"
     pc_client_type: int = 1
-    version_code: str = ClientConfManager.brm_version().get("code", "190500")
-    version_name: str = ClientConfManager.brm_version().get("name", "19.5.0")
+    publish_video_strategy_type: int = 2
+    pc_libra_divert: str = "Windows"
+    version_code: str = ClientConfManager.brm_version().get("code", "290100")
+    version_name: str = ClientConfManager.brm_version().get("name", "29.1.0")
     cookie_enabled: str = "true"
     screen_width: int = 1920
     screen_height: int = 1080
     browser_language: str = ClientConfManager.brm_browser().get("language", "zh-CN")
     browser_platform: str = ClientConfManager.brm_browser().get("platform", "Win32")
     browser_name: str = ClientConfManager.brm_browser().get("name", "Edge")
-    browser_version: str = ClientConfManager.brm_browser().get("version", "122.0.0.0")
+    browser_version: str = ClientConfManager.brm_browser().get("version", "130.0.0.0")
     browser_online: str = "true"
     engine_name: str = ClientConfManager.brm_engine().get("name", "Blink")
-    engine_version: str = ClientConfManager.brm_engine().get("version", "122.0.0.0")
+    engine_version: str = ClientConfManager.brm_engine().get("version", "130.0.0.0")
     os_name: str = ClientConfManager.brm_os().get("name", "Windows")
     os_version: str = ClientConfManager.brm_os().get("version", "10")
     cpu_core_num: int = 12
@@ -36,8 +38,7 @@ class BaseRequestModel(BaseModel):
     try:
         msToken: str = TokenManager.gen_real_msToken()
     except:
-        # 返回虚假的msToken (Return a fake msToken)
-        msToken: str = TokenManager.gen_false_msToken()
+        msToken: str = TokenManager.gen_real_msToken()
 
 
 class BaseLiveModel(BaseModel):
@@ -52,11 +53,10 @@ class BaseLiveModel(BaseModel):
     browser_language: str = ClientConfManager.blm_browser().get("language", "zh-CN")
     browser_platform: str = ClientConfManager.blm_browser().get("platform", "Win32")
     browser_name: str = ClientConfManager.blm_browser().get("name", "Edge")
-    browser_version: str = ClientConfManager.blm_browser().get("version", "119.0.0.0")
+    browser_version: str = ClientConfManager.blm_browser().get("version", "130.0.0.0")
     enter_source: Any = ""
     is_need_double_stream: str = "false"
     # msToken: str = TokenManager.gen_real_msToken()
-    # _signature: str = ''
 
 
 class BaseLiveModel2(BaseModel):
@@ -66,7 +66,7 @@ class BaseLiveModel2(BaseModel):
     sec_user_id: str = ""
     version_code: str = "99.99.99"
     app_id: str = "1128"
-    msToken: str = TokenManager.gen_real_msToken()
+    msToken: str = ""
 
 
 class BaseLoginModel(BaseModel):
@@ -91,7 +91,7 @@ class BaseWebCastModel(BaseModel):
     browser_platform: str = "Win32"
     browser_name: str = "Mozilla"
     browser_version: str = quote(
-        "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+        "5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
         safe="",
     )
     browser_online: str = "true"
@@ -162,6 +162,7 @@ class FriendFeed(BaseRequestModel):
     aweme_ids: str = ""
     room_ids: str = ""
     pull_type: int = 0
+    refresh_type: int = 0
     address_book_access: int = 2
     gps_access: int = 2
     recent_gids: str = ""
@@ -331,3 +332,10 @@ class QueryUser(BaseRequestModel):
     update_version_code: str = "170400"
     version_code: str = "170400"
     version_name: str = "17.4.0"
+
+
+class PostStats(BaseRequestModel):
+    aweme_type: int
+    item_id: str
+    play_delta: int = 1
+    source: int = 0

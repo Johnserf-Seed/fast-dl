@@ -7,7 +7,6 @@ from typing import AsyncGenerator, Union, Dict, Any, List
 from f2.log.logger import logger
 from f2.i18n.translator import _
 from f2.utils.decorators import mode_handler, mode_function_map
-from f2.utils.utils import split_set_cookie
 from f2.apps.twitter.db import AsyncUserDB
 from f2.apps.twitter.crawler import TwitterCrawler
 from f2.apps.twitter.dl import TwitterDownloader
@@ -15,15 +14,18 @@ from f2.apps.twitter.model import (
     TweetDetailEncode,
     UserProfileEncode,
     PostTweetEncode,
+    LikeTweetEncode,
+    BookmarkTweetEncode,
 )
 from f2.apps.twitter.filter import (
     TweetDetailFilter,
     UserProfileFilter,
     PostTweetFilter,
-    PostRetweetFilter,
+    LikeTweetFilter,
+    BookmarkTweetFilter,
 )
 from f2.apps.twitter.utils import (
-    UserIdFetcher,
+    UniqueIdFetcher,
     TweetIdFetcher,
     create_or_rename_user_folder,
 )
@@ -101,6 +103,7 @@ class TwitterHandler:
         # 如果用户不在数据库中，将其添加到数据库
         if not local_user_data:
             await db.add_user_info(**current_user_data._to_dict())
+            logger.debug(_("用户：{0} 已添加到数据库").format(current_nickname))
 
         return user_path
 
@@ -126,8 +129,6 @@ class TwitterHandler:
         #     await self.get_or_add_tweet_data(
         #         tweet_data._to_dict(), db, self.ignore_fields
         #     )
-
-        # logger.info(_("单个推文数据：{0}").format(tweet_data._to_dict()))
 
         # 创建下载任务
         await self.downloader.create_download_tasks(
@@ -155,8 +156,11 @@ class TwitterHandler:
             tweet = TweetDetailFilter(response)
 
         logger.info(
-            _("推文ID：{0} 推文文案：{1} 作者：{2}").format(
-                tweet.tweet_id, tweet.tweet_desc, tweet.nickname
+            _("推文ID：{0} 推文文案：{1} 作者：{2} 推文阅读量：{3}").format(
+                tweet.tweet_id,
+                tweet.tweet_desc,
+                tweet.nickname,
+                tweet.tweet_views_count,
             )
         )
 
@@ -176,7 +180,7 @@ class TwitterHandler:
         page_counts = self.kwargs.get("page_counts", 20)
         max_counts = self.kwargs.get("max_counts")
 
-        uniqueID = await UserIdFetcher.get_user_id(self.kwargs.get("url"))
+        uniqueID = await UniqueIdFetcher.get_unique_id(self.kwargs.get("url"))
         user = await self.fetch_user_profile(uniqueID)
 
         async with AsyncUserDB("twitter_users.db") as udb:
@@ -218,13 +222,14 @@ class TwitterHandler:
         while tweets_collected < max_counts:
             current_request_size = min(page_counts, max_counts - tweets_collected)
 
-            logger.debug("===================================")
             logger.debug(
                 _("最大数量：{0} 每次请求数量：{1}").format(
                     max_counts, current_request_size
                 )
             )
-            logger.info(_("开始爬取第 {0} 页").format(max_cursor))
+            logger.info(
+                _("开始爬取第 {0} 页").format("1" if max_cursor == "" else max_cursor)
+            )
 
             async with TwitterCrawler(self.kwargs) as crawler:
                 params = PostTweetEncode(
@@ -233,46 +238,34 @@ class TwitterHandler:
                 response = await crawler.fetch_post_tweet(params)
                 tweet = PostTweetFilter(response)
 
-            logger.debug(_("当前请求的max_cursor：{0}").format(max_cursor))
-            logger.info(
+            logger.debug(
                 _("推文ID：{0} 推文文案：{1} 作者：{2}").format(
                     tweet.tweet_id, tweet.tweet_desc, tweet.nickname
                 )
             )
-            logger.info(tweet._to_dict())
-            if len(tweet.tweet_id) == 0:
-                # 只有tweet.tweet_id 和 tweet.tweet_desc都为None时，才认为已经爬取完毕
-                # 且只有min_cursor与max_cursor 2个值时没有其他值时才认为到达底部
-                if tweet.tweet_id is None and tweet.tweet_desc is None:
-                    logger.info(
-                        _("用户：{0} 所有发布的推文采集完毕").format(tweet.nickname)
-                    )
-                    break
 
-                logger.info(_("max_cursor：{0} 未找到发布的推文").format(max_cursor))
-                max_cursor = tweet.max_cursor
-                await asyncio.sleep(self.kwargs.get("timeout", 5))
-                continue
+            # 当cursorType值为Bottom且entryId长度为2时，表示已经爬取完所有的推文
+            if tweet.cursorType == "Bottom" and len(tweet.entryId) == 2:
+                logger.info(_("已处理完所有发布的推文"))
+                break
 
             yield tweet
 
-            # 更新已经处理的作品数量 (Update the number of videos processed)
-            tweets_collected += len(tweet.tweet_id)
-
+            # 更新已经处理的推文数量 (Update the number of videos processed)
+            tweets_collected += len(list(filter(None, tweet.tweet_id)))
             max_cursor = tweet.max_cursor
-            logger.info(f"下一页{tweet.max_cursor}")
 
             # 避免请求过于频繁
             logger.info(_("等待 {0} 秒后继续").format(self.kwargs.get("timeout", 5)))
             await asyncio.sleep(self.kwargs.get("timeout", 5))
 
-        logger.info(_("爬取结束，共爬取 {0} 个作品").format(tweets_collected))
+        logger.info(_("爬取结束，共爬取 {0} 个推文").format(tweets_collected))
 
-    @mode_handler("retweet")
-    async def handle_retweet(self):
+    @mode_handler("like")
+    async def handle_like_tweet(self):
         """
-        用于处理转发推文。
-        (Used to process retweet tweets.)
+        用于处理喜欢推文。
+        (Used to process like tweets.)
 
         Args:
             kwargs: dict: 参数字典 (Parameter dictionary)
@@ -282,13 +275,13 @@ class TwitterHandler:
         page_counts = self.kwargs.get("page_counts", 20)
         max_counts = self.kwargs.get("max_counts")
 
-        uniqueID = await UserIdFetcher.get_user_id(self.kwargs.get("url"))
+        uniqueID = await UniqueIdFetcher.get_unique_id(self.kwargs.get("url"))
         user = await self.fetch_user_profile(uniqueID)
 
         async with AsyncUserDB("twitter_users.db") as udb:
             user_path = await self.get_or_add_user_data(self.kwargs, uniqueID, udb)
 
-        async for tweet_list in self.fetch_retweet(
+        async for tweet_list in self.fetch_like_tweet(
             user.user_rest_id, page_counts, max_cursor, max_counts
         ):
             # 创建下载任务
@@ -296,15 +289,15 @@ class TwitterHandler:
                 self.kwargs, tweet_list._to_list(), user_path
             )
 
-    async def fetch_retweet(
+    async def fetch_like_tweet(
         self,
         userId: str,
         page_counts: int = 20,
         max_cursor: str = "",
         max_counts: int = None,
-    ) -> AsyncGenerator[PostTweetFilter, Any]:
+    ) -> AsyncGenerator[LikeTweetFilter, Any]:
         """
-        用于获取用户转发的推文。
+        用于获取用户喜欢的推文。
 
         Args:
             userId: str: 用户ID
@@ -313,71 +306,157 @@ class TwitterHandler:
             max_counts: int: 最大请求次数
 
         Return:
-            tweet: PostTweetFilter: 用户转发的推文数据过滤器
+            like: LikeTweetFilter: 用户喜欢的推文数据过滤器
         """
 
         max_counts = max_counts or float("inf")
         tweets_collected = 0
 
-        logger.info(_("开始爬取用户：{0} 转发的推文").format(userId))
+        logger.info(_("开始爬取用户：{0} 喜欢的推文").format(userId))
 
         while tweets_collected < max_counts:
             current_request_size = min(page_counts, max_counts - tweets_collected)
 
-            logger.debug("===================================")
             logger.debug(
                 _("最大数量：{0} 每次请求数量：{1}").format(
                     max_counts, current_request_size
                 )
             )
-            logger.info(_("开始爬取第 {0} 页").format(max_cursor))
+            logger.info(
+                _("开始爬取第 {0} 页").format("1" if max_cursor == "" else max_cursor)
+            )
 
             async with TwitterCrawler(self.kwargs) as crawler:
-                params = PostTweetEncode(
+                params = LikeTweetEncode(
                     userId=userId, count=current_request_size, cursor=max_cursor
                 )
-                response = await crawler.fetch_post_tweet(params)
-                retweet = PostRetweetFilter(response)
+                response = await crawler.fetch_like_tweet(params)
+                like = LikeTweetFilter(response)
 
-            logger.debug(_("当前请求的max_cursor：{0}").format(max_cursor))
-            # logger.info(
-            #     _("推文ID：{0} 推文文案：{1} 作者：{2}").format(
-            #         retweet.tweet_id, retweet.tweet_desc, retweet.nickname
-            #     )
-            # )
-            logger.info(
-                _("推文文案：{0} 推文图片：{1} 推文视频：{2}").format(
-                    retweet.tweet_desc, retweet.tweet_media_url, retweet.tweet_video_url
+            logger.debug(
+                _("推文ID：{0} 推文文案：{1} 作者：{2}").format(
+                    like.tweet_id, like.tweet_desc, like.nickname
                 )
             )
-            # logger.info(retweet._to_dict())
-            if len(retweet.tweet_id) == 0:
-                # 只有tweet.tweet_id 和 tweet.tweet_desc都为None时，才认为已经爬取完毕
-                # 且只有min_cursor与max_cursor 2个值时没有其他值时才认为到达底部
-                if retweet.tweet_id is None and retweet.tweet_desc is None:
-                    logger.info(
-                        _("用户：{0} 所有转发的推文采集完毕").format(retweet.nickname)
-                    )
-                    break
+            if like.max_cursor is None:
+                logger.error(_("该用户没有公开喜欢的推文"))
+                break
 
-                logger.info(_("max_cursor：{0} 未找到转发的推文").format(max_cursor))
-                max_cursor = retweet.max_cursor
-                await asyncio.sleep(self.kwargs.get("timeout", 5))
-                continue
+            # 当cursorType值为Bottom且entryId长度为2时，表示已经爬取完所有的推文
+            if like.cursorType == "Bottom" and len(like.entryId) == 2:
+                logger.info(_("已处理完所有喜欢的推文"))
+                break
 
-            yield retweet
+            yield like
 
-            # 更新已经处理的作品数量 (Update the number of videos processed)
-            tweets_collected += len(retweet.tweet_id)
-
-            max_cursor = retweet.max_cursor
-            logger.info(f"下一页{retweet.max_cursor}")
+            # 更新已经处理的推文数量 (Update the number of videos processed)
+            tweets_collected += len(list(filter(None, like.tweet_id)))
+            max_cursor = like.max_cursor
 
             # 避免请求过于频繁
             logger.info(_("等待 {0} 秒后继续").format(self.kwargs.get("timeout", 5)))
             await asyncio.sleep(self.kwargs.get("timeout", 5))
 
-        logger.info(_("爬取结束，共爬取 {0} 个作品").format(tweets_collected))
+        logger.info(_("爬取结束，共爬取 {0} 个推文").format(tweets_collected))
+
+    @mode_handler("bookmark")
+    async def handle_bookmark_tweet(self):
+        """
+        用于处理收藏推文。
+        (Used to process bookmark tweets.)
+
+        Args:
+            kwargs: dict: 参数字典 (Parameter dictionary)
+        """
+
+        max_cursor = self.kwargs.get("max_cursor", "")
+        page_counts = self.kwargs.get("page_counts", 20)
+        max_counts = self.kwargs.get("max_counts")
+
+        uniqueID = await UniqueIdFetcher.get_unique_id(self.kwargs.get("url"))
+
+        async with AsyncUserDB("twitter_users.db") as udb:
+            user_path = await self.get_or_add_user_data(self.kwargs, uniqueID, udb)
+
+        async for tweet_list in self.fetch_bookmark_tweet(
+            page_counts, max_cursor, max_counts
+        ):
+            # 创建下载任务
+            await self.downloader.create_download_tasks(
+                self.kwargs, tweet_list._to_list(), user_path
+            )
+
+    async def fetch_bookmark_tweet(
+        self,
+        page_counts: int = 20,
+        max_cursor: str = "",
+        max_counts: int = None,
+    ) -> AsyncGenerator[LikeTweetFilter, Any]:
+        """
+        用于获取用户收藏的推文。
+
+        Args:
+            page_counts: int: 每次请求的推文数量
+            max_cursor: str: 游标
+            max_counts: int: 最大请求次数
+
+        Return:
+            like: LikeTweetFilter: 用户收藏的推文数据过滤器
+
+        Note:
+            不需要传入用户ID，提供Cookie即可
+        """
+
+        max_counts = max_counts or float("inf")
+        tweets_collected = 0
+
+        logger.info(_("开始爬取收藏的推文"))
+
+        while tweets_collected < max_counts:
+            current_request_size = min(page_counts, max_counts - tweets_collected)
+
+            logger.debug(
+                _("最大数量：{0} 每次请求数量：{1}").format(
+                    max_counts, current_request_size
+                )
+            )
+            logger.info(
+                _("开始爬取第 {0} 页").format("1" if max_cursor == "" else max_cursor)
+            )
+
+            async with TwitterCrawler(self.kwargs) as crawler:
+                params = BookmarkTweetEncode(
+                    count=current_request_size, cursor=max_cursor
+                )
+                response = await crawler.fetch_bookmark_tweet(params)
+                bookmark = BookmarkTweetFilter(response)
+
+            logger.debug(
+                _("推文ID：{0} 推文文案：{1} 作者：{2}").format(
+                    bookmark.tweet_id, bookmark.tweet_desc, bookmark.nickname
+                )
+            )
+
+            if bookmark.max_cursor is None:
+                logger.error(_("该用户没有收藏的推文"))
+                break
+
+            # 当cursorType值为Bottom且entryId长度为2时，表示已经爬取完所有的推文
+            if bookmark.cursorType == "Bottom" and len(bookmark.entryId) == 2:
+                logger.info(_("已处理完所有收藏的推文"))
+                break
+
+            yield bookmark
+
+            # 更新已经处理的推文数量 (Update the number of videos processed)
+            tweets_collected += len(list(filter(None, bookmark.tweet_id)))
+            max_cursor = bookmark.max_cursor
+
+            # 避免请求过于频繁
+            logger.info(_("等待 {0} 秒后继续").format(self.kwargs.get("timeout", 5)))
+            await asyncio.sleep(self.kwargs.get("timeout", 5))
+
+        logger.info(_("爬取结束，共爬取 {0} 个推文").format(tweets_collected))
 
 
 async def main(kwargs):

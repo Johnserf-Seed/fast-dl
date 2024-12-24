@@ -1,22 +1,39 @@
 f2:
   version: "0.0.1.6"
   show_update: true
+  enable_bark: true
+
+  bark:
+    headers:
+      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
+      Referer: https://api.day.app/
+
+    encryption:
+      algorithm: AES128
+      enable: true
+      mode: CBC
+      padding: PKCS7
+      key: ""
+
+    proxies:
+      http://:
+      https://:
 
   douyin:
     encryption: ab
 
     BaseRequestModel:
       version:
-        code: "190500"
-        name: "19.5.0"
+        code: "290100"
+        name: "29.1.0"
       browser:
         language: zh-CN
         platform: Win32
         name: Edge
-        version: "122.0.0.0"
+        version: "130.0.0.0"
       engine:
         name: Blink
-        version: "122.0.0.0"
+        version: "130.0.0.0"
       os:
         name: Windows
         version: "10"
@@ -27,15 +44,20 @@ f2:
         language: zh-CN
         platform: Win32
         name: Edge
-        version: "119.0.0.0"
+        version: "130.0.0.0"
 
     headers:
-      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0
+      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
       Referer: https://www.douyin.com/
 
     proxies:
       http://:
       https://:
+
+    wss:
+      domain: localhost
+      port: 8765
+      verify: false
 
     msToken:
       url: https://mssdk.bytedance.com/web/report
@@ -54,7 +76,7 @@ f2:
         app_id: 6383
         referer: https://www.douyin.com/
         url: https://www.douyin.com/
-        user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0
+        user_agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
         user_unique_id: ""
 
   tiktok:
@@ -64,7 +86,7 @@ f2:
         language: zh-CN
         name: Mozilla
         platform: Win32
-        version: 5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+        version: 5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36
 
       device:
         id: "7377772863376426514"
@@ -77,12 +99,17 @@ f2:
       tz_name: Asia/Hong_Kong
 
     headers:
-      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36
+      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36
       Referer: https://www.tiktok.com/
 
     proxies:
       http://:
       https://:
+
+    wss:
+      domain: localhost
+      port: 8766
+      verify: false
 
     msToken:
       url: https://mssdk-sg.tiktok.com/web/common?msToken=QnC7zMMh1cpaDTxHDHnabNOrqaWv49JwA1IAq3AIFvrdaqQi8Rs_YlXSya1vN-4b6C1MgpWpS2cL1oakaUEDe3pUDMLpCbdSc3b3V98Fux0AuwXn_9Ns3FyMTnFRmSOOOVeGg6bVXMSGoMG6dq3k
@@ -98,22 +125,21 @@ f2:
       cookie: ttwid=1%7C3uOVjidbOFBmdS6Aci5oeBb8Ta-HWpeyp2dvhl2Ib2E%7C1716637053%7C462867ee452aecd60a854225b854ff4498e9b99c13d4826a3e2a4e58a4c55134;
 
     odin_tt:
-      url: https://www.tiktok.com/passport/web/account/info/?WebIdLastTime=1716637053&aid=1459&app_language=zh-Hans&app_name=tiktok_web&browser_language=zh-CN&browser_name=Mozilla&browser_online=true&browser_platform=Win32&browser_version=5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29%20AppleWebKit%2F537.36%20%28KHTML%2C%20like%20Gecko%29%20Chrome%2F124.0.0.0%20Safari%2F537.36&channel=tiktok_web&cookie_enabled=true&device_id=7372899909097571857&device_platform=web_pc&focus_state=true&from_page=fyp&history_len=2&is_fullscreen=false&is_page_visible=true&odinId=7372898697492972561&os=windows&priority_region=&referer=&region=SG&screen_height=1080&screen_width=1920&tz_name=Asia%2FHong_Kong&webcast_language=zh-Hans
+      url: https://www.tiktok.com/passport/web/auth/config?WebIdLastTime=1733387890&account_sdk_source=web&aid=1459&app_language=zh-Hans&app_name=tiktok_web&browser_language=zh-CN&browser_name=Mozilla&browser_online=true&browser_platform=Win32&browser_version=5.0%20%28Windows%20NT%2010.0%3B%20Win64%3B%20x64%29%20AppleWebKit%2F537.36%20%28KHTML%2C%20like%20Gecko%29%20Chrome%2F131.0.0.0%20Safari%2F537.36&channel=tiktok_web&cookie_enabled=true&data_collection_enabled=true&device_id=7444844253941876231&device_platform=web_pc&focus_state=true&from_page=fyp&history_len=3&is_fullscreen=false&is_page_visible=true&odinId=7444842897268327431&os=windows&priority_region=&referer=&region=TW&screen_height=1080&screen_width=1920&tz_name=Asia%2FHong_Kong&user_is_login=false&webcast_language=zh-Hans&msToken=Rr7x4_7ABrw16uXFR33lyk5_HML6vIUi6F_aAeqOy8dIVGXhgJaSB7y7s-8_X4dXdwcoy5RfUQKomZzOg8Hf_6dQwmqosHxTNcn0Y7-gwVjcJ0IW3pqwg5Aq9W-D1gZZ6dFoFFPucU8B2SJ_Ma4brk45tQ==
 
   twitter:
     headers:
-      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0
+      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
       Referer: https://twitter.com/
       Authorization: Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA
-      X-Csrf-Token: ""
-
+      X-Csrf-Token:
     proxies:
       http://:
       https://:
 
   weibo:
     headers:
-      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0
+      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
       Referer: https://weibo.com/
 
     proxies:

@@ -1,4 +1,5 @@
 import pytest
+from f2.i18n.translator import _
 from f2.utils.utils import get_timestamp, timestamp_2_str
 
 
@@ -27,6 +28,9 @@ class TestTimestamp2Str:
 
     def test_timestamp_2_str_with_invalid_timestamp(self):
         assert timestamp_2_str("1620000000") == "2021-05-03 08-00-00"
+
+    def test_millisecond_timestamp_2_str(self):
+        assert timestamp_2_str(1697889407000) == "2023-10-21 19-56-47"
 
     def test_long_timestamp_2_str(self):
         assert (
@@ -58,9 +62,9 @@ class TestTimestamp2Str:
         )
 
     def test_invalid_timestamp_2_str(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError, match=_("无效的时间戳字符串")):
             timestamp_2_str("invalid_timestamp")
 
     def test_invalid_timestamp_2_str_with_format(self):
-        with pytest.raises(ValueError):
+        with pytest.raises(TypeError, match=_("无效的时间戳字符串")):
             timestamp_2_str("invalid_timestamp", "%Y-%m-%d %H-%M-%S")

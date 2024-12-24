@@ -1,10 +1,13 @@
 # path: f2/utils/conf_manager.py
 
 import f2
+import sys
 import yaml
 import click
+import traceback
 
 from pathlib import Path
+
 from f2.exceptions.file_exceptions import (
     FileNotFound,
     FilePermissionError,
@@ -23,13 +26,44 @@ class ConfigManager:
             self.filepath = Path(get_resource_path(filepath))
         self.config = self.load_config()
 
+    def _replace_none(self, data, default=""):
+        """
+        替换字典中的 None 值为默认值 (Replace None values in the dict with a default value)
+
+        Args:
+            data: dict | list: 配置数据 (Configuration data)
+            default: any: 默认值 (Default value to replace None)
+
+        Returns:
+            dict | list: 处理后的数据 (Processed data)
+        """
+        if isinstance(data, dict):
+            return {
+                k: (default if v is None else self._replace_none(v, default))
+                for k, v in data.items()
+            }
+        elif isinstance(data, list):
+            return [
+                (default if item is None else self._replace_none(item, default))
+                for item in data
+            ]
+        return data
+
     def load_config(self) -> dict:
         """从文件中加载配置 (Load the conf from the file)"""
 
         if not self.filepath.exists():
             raise FileNotFound(_("配置文件不存在"), self.filepath)
-
-        return yaml.safe_load(self.filepath.read_text(encoding="utf-8")) or {}
+        try:
+            config = yaml.safe_load(self.filepath.read_text(encoding="utf-8")) or {}
+            # 遍历配置，替换 None 值为空字符串
+            return self._replace_none(config)
+        except PermissionError:
+            raise FilePermissionError(_("配置文件路径无读权限"), self.filepath)
+        except yaml.YAMLError:
+            logger.error(_("配置文件解析错误"))
+            logger.debug(traceback.format_exc())
+            sys.exit(1)
 
     def get_config(self, app_name: str, default=None) -> dict:
         """

@@ -12,6 +12,9 @@ class TiktokAPIEndpoints:
     # 直播域名 (Webcast Domain)
     WEBCAST_DOMAIN = "https://webcast.tiktok.com"
 
+    # WSS域名 (WSS Domain)
+    WEBCAST_WSS_DOMAIN = "wss://webcast16-ws-alisg.tiktok.com"
+
     # 登录 (Login)
     LOGIN_ENDPOINT = f"{TIKTOK_DOMAIN}/login/"
 
@@ -54,8 +57,14 @@ class TiktokAPIEndpoints:
     # 作品搜索 (Post Search)
     POST_SEARCH = f"{TIKTOK_DOMAIN}/api/search/item/full/"
 
-    # 用户直播 (User Live)
+    # 用户直播间 (User Live Room)
     USER_LIVE = f"{TIKTOK_DOMAIN}/api-live/user/room/"
 
     # 检查开播状态 (Check Live Status)
     CHECK_LIVE_ALIVE = f"{WEBCAST_DOMAIN}/webcast/room/check_alive/"
+
+    # 直播弹幕初始化 (Live Danmaku Init)
+    LIVE_IM_FETCH = f"{WEBCAST_DOMAIN}/webcast/im/fetch/"
+
+    # 直播弹幕(WSS) (Live Danmaku WSS)
+    LIVE_IM_WSS = f"{WEBCAST_WSS_DOMAIN}/webcast/im/ws_proxy/ws_reuse_supplement/"

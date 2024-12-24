@@ -5,10 +5,11 @@ import httpx
 import asyncio
 import aiofiles
 import traceback
+
 from pathlib import Path
 from urllib.error import HTTPError as urllib_HTTPError
 from rich.progress import TaskID
-from typing import Union, Optional, Any, List
+from typing import Union, Optional, Any, List, Set
 
 from f2.log.logger import logger
 from f2.i18n.translator import _
@@ -34,7 +35,7 @@ class BaseDownloader(BaseCrawler):
     def __init__(self, kwargs: dict = ...):
         proxies = kwargs.get("proxies", {"http://": None, "https://": None})
         self.headers = kwargs.get("headers") | {"Cookie": kwargs["cookie"]}
-        super().__init__(proxies=proxies, crawler_headers=self.headers)
+        super().__init__(kwargs, proxies=proxies, crawler_headers=self.headers)
 
         self.progress = RichConsoleManager().progress
         self.download_tasks = []
@@ -195,18 +196,22 @@ class BaseDownloader(BaseCrawler):
 
                     await self.progress.update(
                         task_id,
-                        description=_("[  失败  ]："),
+                        description=_("[red][  失败  ]：[/red]"),
                         filename=trim_filename(full_path.name, 45),
                         state="error",
                     )
 
+                logger.info(
+                    _("[green][  完成  ]：{0}[/green]").format(Path(full_path).name)
+                )
                 await self.progress.update(
                     task_id,
-                    description=_("[  完成  ]:"),
+                    description=_("[green][  完成  ]：[/green]"),
                     filename=trim_filename(full_path.name, 45),
                     state="completed",
+                    visible=False,
                 )
-                logger.debug(_("下载完成, 文件已保存为 {0}").format(full_path))
+                logger.debug(_("文件已保存到： {0}").format(full_path))
 
                 # 如果下载成功，则跳出循环 (If download is successful, break the loop)
                 break
@@ -214,11 +219,16 @@ class BaseDownloader(BaseCrawler):
             else:
                 # 如果遍历完所有链接仍然无法成功下载，则记录警告
                 logger.warning("所有链接都无法下载")
+                logger.error(
+                    _("[red][  丢失  ]：[/red]")
+                    + _("无法下载文件：{0}").format(Path(full_path).name)
+                )
                 await self.progress.update(
                     task_id,
-                    description=_("[  丢失  ]："),
+                    description=_("[red][  丢失  ]：[/red]"),
                     filename=trim_filename(full_path.name, 45),
                     state="error",
+                    visible=False,
                 )
 
     async def save_file(
@@ -248,13 +258,15 @@ class BaseDownloader(BaseCrawler):
         async with aiofiles.open(file=full_path, mode=mode, encoding="utf-8") as f:
             await f.write(content)
 
+        logger.info(_("[green][  完成  ]： {0}[/green]").format(Path(full_path).name))
         await self.progress.update(
             task_id,
-            description=_("[  完成  ]:"),
+            description=_("[green][  完成  ]：[/green]"),
             filename=trim_filename(full_path.name, 45),
             state="completed",
+            visible=False,
         )
-        logger.debug(_("下载完成, 文件已保存为 {0}").format(full_path))
+        logger.debug(_("文件已保存到： {0}").format(full_path))
 
     async def download_m3u8_stream(
         self,
@@ -269,6 +281,11 @@ class BaseDownloader(BaseCrawler):
             task_id (TaskID): 任务ID (Task ID)
             url (str): m3u8文件的URL (m3u8 file URL)
             full_path (Union[str, Path]): 保存路径 (Save path)
+
+        Note:
+            可能会出现 httpx.RemoteProtocolError 错误，这是由于服务器返回的块大小未严格遵守 HTTP 规范。
+            非代码问题，而是服务器问题，跳过该片段处理。
+            Issues: https://github.com/encode/httpx/issues/1927
         """
         async with self.semaphore:
             full_path = self._ensure_path(full_path)
@@ -278,7 +295,7 @@ class BaseDownloader(BaseCrawler):
             default_chunks = 409600
             # 记录已经下载的片段序号
             # (Record the segment number that has been downloaded)
-            downloaded_segments = set()
+            downloaded_segments: Set = set()
 
             while not SignalManager.is_shutdown_signaled():
                 try:
@@ -287,7 +304,7 @@ class BaseDownloader(BaseCrawler):
                     if not segments:
                         await self.progress.update(
                             task_id,
-                            description=_("[  丢失  ]："),
+                            description=_("[red][  丢失  ]：[/red]"),
                             filename=trim_filename(full_path.name, 45),
                             state="completed",
                         )
@@ -311,19 +328,20 @@ class BaseDownloader(BaseCrawler):
                                 )
                                 if ts_content_length == 0:
                                     ts_content_length = default_chunks
-                                    logger.warning(
+                                    logger.debug(
                                         _(
                                             "无法读取该TS文件字节长度，将使用默认400kb块大小处理数据"
                                         )
                                     )
-                                ts_request = self.aclient.build_request(
-                                    "GET", ts_url, headers=self.headers
-                                )
-                                ts_response = await self.aclient.send(
-                                    ts_request, stream=True
-                                )
 
                                 try:
+                                    ts_request = self.aclient.build_request(
+                                        "GET", ts_url, headers=self.headers
+                                    )
+                                    ts_response = await self.aclient.send(
+                                        ts_request, stream=True
+                                    )
+
                                     async for chunk in ts_response.aiter_bytes(
                                         get_chunk_size(ts_content_length)
                                     ):
@@ -344,16 +362,23 @@ class BaseDownloader(BaseCrawler):
                                     # (Record the segment number that has been downloaded)
                                     downloaded_segments.add(segment.absolute_uri)
 
-                                except httpx.ReadTimeout as e:
-                                    logger.warning(_("TS文件下载超时: {0}").format(e))
-                                except Exception as e:
-                                    logger.error(_("TS文件下载失败: {0}").format(e))
-                                    logger.error(traceback.format_exc())
+                                except httpx.ReadTimeout:
+                                    logger.warning(_("TS 文件下载超时：跳过该片段"))
+                                    continue
+
+                                except httpx.RemoteProtocolError as e:
+                                    logger.error(
+                                        _(
+                                            "服务器返回的块大小未严格遵守 HTTP 规范，跳过该片段。错误信息：{0}"
+                                        ).format(e)
+                                    )
+                                    continue
+
                                 finally:
                                     await ts_response.aclose()
                             else:
                                 logger.debug(
-                                    _("为你跳过已下载的片段，URI: {0}").format(
+                                    _("跳过已下载的片段，URI: {0}").format(
                                         segment.absolute_uri
                                     )
                                 )
@@ -371,16 +396,17 @@ class BaseDownloader(BaseCrawler):
                         logger.warning(_("m3u8文件或ts文件未找到，可能直播结束"))
                         await self.progress.update(
                             task_id,
-                            description=_("[  丢失  ]："),
+                            description=_("[red][  丢失  ]：[/red]"),
                             filename=trim_filename(full_path.name, 45),
                             state="completed",
                         )
                         return
                     else:
-                        logger.error(_("HTTP错误: {0}").format(e))
+                        logger.debug(_("HTTP错误: {0}").format(e))
+                        logger.error(_("[red]m3u8文件下载失败，但文件已保存[/red]"))
                         await self.progress.update(
                             task_id,
-                            description=_("[  失败  ]："),
+                            description=_("[red][  失败  ]：[/red]"),
                             filename=trim_filename(full_path.name, 45),
                             state="completed",
                         )
@@ -389,29 +415,37 @@ class BaseDownloader(BaseCrawler):
                 except urllib_HTTPError as e:
                     if e.code == 404:
                         logger.warning(_("m3u8文件或ts文件未找到，直播已结束"))
+                        logger.info(
+                            _("[green][  完成  ]：{0}[/green]").format(
+                                Path(full_path).name
+                            )
+                        )
                         await self.progress.update(
                             task_id,
-                            description=_("[  完成  ]:"),
+                            description=_("[green][  完成  ]：[/green]"),
                             filename=trim_filename(full_path.name, 45),
                             state="completed",
+                            visible=False,
                         )
+                        logger.debug(_("文件已保存到： {0}").format(full_path))
                         return
-                    logger.error(_("m3u8文件下载失败：{0}，但文件已保存").format(e))
+
                     logger.error(traceback.format_exc())
+                    logger.error(_("[red]m3u8文件下载失败，但文件已保存[/red]"))
                     await self.progress.update(
                         task_id,
-                        description=_("[  失败  ]："),
+                        description=_("[red][  失败  ]：[/red]"),
                         filename=trim_filename(full_path.name, 45),
                         state="completed",
                     )
                     return
 
                 except Exception as e:
-                    logger.error(_("m3u8文件解析失败: {0}").format(e))
                     logger.error(traceback.format_exc())
+                    logger.error(_("m3u8文件解析失败: {0}").format(e))
                     await self.progress.update(
                         task_id,
-                        description=_("[  失败  ]："),
+                        description=_("[red][  失败  ]：[/red]"),
                         filename=trim_filename(full_path.name, 45),
                         state="completed",
                     )
@@ -449,14 +483,15 @@ class BaseDownloader(BaseCrawler):
         full_path = self._ensure_path(base_path) / file_path
 
         if full_path.exists():
+            logger.info(_("[cyan][  跳过  ]: {0}[/cyan]").format(Path(full_path).name))
             task_id = await self.progress.add_task(
-                description=_("[  跳过  ]:"),
+                description=_("[cyan][  跳过  ]:[/cyan]"),
                 filename=trim_filename(file_path, 45),
                 start=True,
                 total=1,
                 completed=1,
             )
-            await self.progress.update(task_id, state="completed")
+            await self.progress.update(task_id, state="completed", visible=False)
         else:
             task_id = await self.progress.add_task(
                 description=_("[  {0}  ]:").format(file_type),
@@ -496,14 +531,15 @@ class BaseDownloader(BaseCrawler):
         full_path = self._ensure_path(base_path) / file_path
 
         if full_path.exists():
+            logger.info(_("[cyan][  跳过  ]: {0}[/cyan]").format(Path(full_path).name))
             task_id = await self.progress.add_task(
-                description=_("[  跳过  ]:"),
+                description=_("[cyan][  跳过  ]:[/cyan]"),
                 filename=trim_filename(file_path, 45),
                 start=True,
                 total=1,
                 completed=1,
             )
-            await self.progress.update(task_id, state="completed")
+            await self.progress.update(task_id, state="completed", visible=False)
         else:
             task_id = await self.progress.add_task(
                 description=_("[  {0}  ]:").format(file_type),
@@ -542,14 +578,15 @@ class BaseDownloader(BaseCrawler):
         full_path = self._ensure_path(base_path) / file_path
 
         if full_path.exists():
+            logger.info(_("[cyan][  跳过  ]: {0}[/cyan]").format(Path(full_path).name))
             task_id = await self.progress.add_task(
-                description=_("[  跳过  ]:"),
+                description=_("[cyan][  跳过  ]:[/cyan]"),
                 filename=trim_filename(file_path, 45),
                 start=True,
                 total=1,
                 completed=1,
             )
-            await self.progress.update(task_id, state="completed")
+            await self.progress.update(task_id, state="completed", visible=False)
         else:
             task_id = await self.progress.add_task(
                 description=_("[  {0}  ]:").format(file_type),
