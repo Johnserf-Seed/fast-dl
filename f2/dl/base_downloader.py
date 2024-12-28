@@ -30,7 +30,49 @@ MAX_SEGMENT_COUNT = 1000
 
 
 class BaseDownloader(BaseCrawler):
-    """基础下载器 (Base Downloader Class)"""
+    """
+    基础下载器 (Base Downloader)
+
+    该类继承自 BaseCrawler 类，提供了一个基础下载器，负责处理文件的下载任务，支持下载单个文件、静态文件以及流式视频下载。
+
+    它支持断点续传、进度跟踪和错误处理，适用于多种文件下载场景。
+
+    类属性:
+    - headers (dict): 自定义 HTTP 请求头，包括 Cookie 信息。
+    - progress (RichConsoleManager.progress): 下载进度管理器，用于显示下载进度。
+    - download_tasks (list): 存储所有下载任务的列表。
+
+    类方法:
+    - _ensure_path: 确保目标路径存在，如果不存在则创建。
+    - _download_chunks: 处理文件的分块下载，支持边下载边更新进度。
+    - download_file: 下载文件，如果文件已经部分下载，则支持断点续传。
+    - save_file: 保存静态文件到指定路径。
+    - download_m3u8_stream: 下载 m3u8 流视频，支持多个片段的下载与合并。
+    - initiate_download: 初始化文件下载任务，根据文件是否存在跳过或开始下载。
+    - initiate_static_download: 初始化静态文件下载任务。
+    - initiate_m3u8_download: 初始化 m3u8 流视频下载任务。
+    - execute_tasks: 执行所有下载任务。
+    - close: 关闭下载器，释放资源。
+    - __aenter__: 异步上下文管理器的进入方法，初始化下载器。
+    - __aexit__: 异步上下文管理器的退出方法，关闭下载器。
+
+    异常处理:
+    - 该类在下载过程中会处理多种异常，包括文件下载错误、网络超时、文件覆盖等问题，保证下载任务的稳定性。
+
+    使用示例:
+    ```python
+        # 创建 BaseDownloader 实例并使用异步方式开始文件下载任务
+        async with BaseDownloader(headers={'Cookie': 'value'}, proxies={'all': 'proxy_url'}) as downloader:
+            await downloader.initiate_download(
+                file_type='视频',
+                file_url='https://example.com/file.mp4',
+                base_path='/path/to/save',
+                file_name='file',
+                file_suffix='.mp4'
+            )
+            await downloader.execute_tasks()
+    ```
+    """
 
     def __init__(self, kwargs: dict = ...):
         proxies = kwargs.get("proxies", {"http://": None, "https://": None})
@@ -137,7 +179,9 @@ class BaseDownloader(BaseCrawler):
                 # 如果文件内容大小为0, 则尝试下一个链接 (If file content size is 0, try the next link)
                 if content_length == 0:
                     logger.warning(
-                        _("链接 {0} 内容长度为0，尝试下一个链接是否可用").format(link)
+                        _("链接 {0} 响应大小为 0 字节，尝试下一个链接是否可用").format(
+                            link
+                        )
                     )
                     continue
 
@@ -283,6 +327,10 @@ class BaseDownloader(BaseCrawler):
             full_path (Union[str, Path]): 保存路径 (Save path)
 
         Note:
+            由于直播流的特殊性，可能会出现直播结束、账号在别处进入直播间等情况，导致直播流无法下载。
+
+            直播流的大小不确定，因此无法准确计算下载进度，只能根据下载的块大小来更新进度条。
+
             可能会出现 httpx.RemoteProtocolError 错误，这是由于服务器返回的块大小未严格遵守 HTTP 规范。
             非代码问题，而是服务器问题，跳过该片段处理。
             Issues: https://github.com/encode/httpx/issues/1927
@@ -378,7 +426,7 @@ class BaseDownloader(BaseCrawler):
                                     await ts_response.aclose()
                             else:
                                 logger.debug(
-                                    _("跳过已下载的片段，URI: {0}").format(
+                                    _("跳过已下载的片段，URL: {0}").format(
                                         segment.absolute_uri
                                     )
                                 )
@@ -388,7 +436,8 @@ class BaseDownloader(BaseCrawler):
                             if len(downloaded_segments) > MAX_SEGMENT_COUNT:
                                 downloaded_segments = set()
 
-                    # 等待一段时间后再次请求更新 (Request update again after waiting for a while)
+                    # 等待片段时长，避免过快下载
+                    # (Wait for the segment duration to avoid downloading too fast)
                     await asyncio.sleep(segment.duration)
 
                 except httpx.HTTPStatusError as e:
@@ -397,6 +446,15 @@ class BaseDownloader(BaseCrawler):
                         await self.progress.update(
                             task_id,
                             description=_("[red][  丢失  ]：[/red]"),
+                            filename=trim_filename(full_path.name, 45),
+                            state="completed",
+                        )
+                        return
+                    elif e.response.status_code == 504:
+                        logger.warning(_("网关超时，无法下载直播流"))
+                        await self.progress.update(
+                            task_id,
+                            description=_("[red][  完成  ]：[/red]"),
                             filename=trim_filename(full_path.name, 45),
                             state="completed",
                         )
