@@ -1,7 +1,7 @@
 f2:
   version: "0.0.1.7"
   show_update: true
-  enable_bark: true
+  enable_bark: false
 
   bark:
     headers:
@@ -9,11 +9,11 @@ f2:
       Referer: https://api.day.app/
 
     encryption:
-      algorithm: AES128
       enable: true
+      algorithm: AES256
       mode: CBC
       padding: PKCS7
-      key: ""
+      key: "62672746275363759291038426391283"
 
     proxies:
       http://:
@@ -86,25 +86,25 @@ f2:
         language: zh-CN
         name: Mozilla
         platform: Win32
-        version: 5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36
+        version: 5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0
 
       device:
-        id: "7377772863376426514"
+        id: "7451992228786750983"
         platform: web_pc
 
       os: windows
       region: SG
-      priority_region: ""
+      priority_region:
       webcast_language: zh-Hans
       tz_name: Asia/Hong_Kong
 
     headers:
-      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36
+      User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0
       Referer: https://www.tiktok.com/
 
     proxies:
-      http://:
-      https://:
+      http://: http://127.0.0.1:3578
+      https://: http://127.0.0.1:3578
 
     wss:
       domain: localhost
@@ -132,7 +132,7 @@ f2:
       User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0
       Referer: https://twitter.com/
       Authorization: Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA
-      X-Csrf-Token:
+      X-Csrf-Token: 7959f0a42cf6b06dbd327eec1ff84bce05497a259f5f30bcc3872e6d1a6221492b8c8a5c47196a589a5ae81b8d0d87777e259c75f38fa495bb84d25b6def63e71ede5b1a1c152f16eded23fb00bf5acf
     proxies:
       http://:
       https://:

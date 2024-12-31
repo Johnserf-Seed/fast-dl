@@ -242,7 +242,11 @@ class DouyinHandler:
 
         aweme_id = await AwemeIdFetcher.get_aweme_id(self.kwargs.get("url"))
 
-        aweme_data = await self.fetch_one_video(aweme_id)
+        try:
+            aweme_data = await self.fetch_one_video(aweme_id)
+        except APIResponseError as e:
+            logger.error(e)
+            return
 
         async with AsyncUserDB("douyin_users.db") as db:
             user_path = await self.get_or_add_user_data(
@@ -280,6 +284,14 @@ class DouyinHandler:
             params = PostDetail(aweme_id=aweme_id)
             response = await crawler.fetch_post_detail(params)
             video = PostDetailFilter(response)
+
+            if video.nickname is None:
+                # 说明接口内容异常
+                raise APIResponseError(
+                    _(
+                        "`fetch_one_video`请求失败。如果是动图作品，则接口正在维护中，请稍后再试。"
+                    )
+                )
 
         logger.debug(
             _("作品ID：{0} 作品文案：{1} 作者：{2}").format(
@@ -879,11 +891,19 @@ class DouyinHandler:
             )
 
         # rich_prompt 会有字符刷新问题，暂时使用rich_print
-        rich_console.print(_("[bold yellow]请输入希望下载的收藏夹序号：[/bold yellow]"))
+        collects_list = [str(i) for i in range(len(collects.collects_id) + 1)]
+        rich_console.print(
+            _(
+                "[bold yellow]请输入希望下载的收藏夹序号：[/bold yellow] [bold purple]{0}[/bold purple]"
+            ).format("/".join(collects_list))
+        )
         selected_index = int(
             rich_prompt.ask(
-                # _("[bold yellow]请输入希望下载的收藏夹序号:[/bold yellow]"),
-                choices=[str(i) for i in range(len(collects.collects_id) + 1)],
+                # _(
+                #    "[bold yellow]请输入希望下载的收藏夹序号:[/bold yellow] [bold purple]{0}[/bold purple]"
+                # ).format(collects_list),
+                console=rich_console,
+                choices=collects_list,
             )
         )
 
@@ -1002,7 +1022,7 @@ class DouyinHandler:
                 params = UserCollectsVideo(
                     cursor=max_cursor,
                     count=current_request_size,
-                    collects_id=collects_id,
+                    collects_id=str(collects_id),
                 )
                 response = await crawler.fetch_user_collects_video(params)
                 video = UserCollectionFilter(response)
